@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }} | DocFlow{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <h1>{{ title }}</h1>
+        <p>Реестр документов с быстрым поиском, фильтрами и карточкой выбранного документа.</p>
+    </div>
+    <a class="button primary" href="{% url 'documents:create' %}">+ Создать документ</a>
+</section>
+
+{% if title == "Мои документы" %}
+    <div class="tabs">
+        <span class="active">Все</span>
+        <span>Черновики</span>
+        <span>На согласовании</span>
+        <span>Просрочено</span>
+    </div>
+{% endif %}
+
+{% if form %}
+<form method="get" class="filters">
+    {{ form.as_p }}
+    <button type="submit">Найти</button>
+</form>
+{% endif %}
+
+<section class="layout-two">
+    <div class="panel">
+        <div class="toolbar">
+            <strong>Документы</strong>
+            <div class="actions">
+                <button type="button">Фильтры</button>
+                <button type="button">Экспорт</button>
+            </div>
+        </div>
+        {% include "documents/partials/document_table.html" with documents=documents %}
+    </div>
+
+    <aside class="panel preview-card">
+        <h2>Карточка документа</h2>
+        {% with document=documents.first %}
+            {% if document %}
+                <dl class="details">
+                    <dt>Номер</dt><dd>{{ document.system_number }}</dd>
+                    <dt>Тип</dt><dd>{{ document.document_type.name }}</dd>
+                    <dt>Объект</dt><dd>{{ document.counterparty|default:document.department|default:"-" }}</dd>
+                    <dt>Ответственный</dt><dd>{{ document.responsible.get_full_name|default:document.responsible.username|default:"-" }}</dd>
+                    <dt>Дата создания</dt><dd>{{ document.registration_date|date:"d.m.Y" }}</dd>
+                    <dt>Текущий этап</dt><dd>{% if document.approval_tasks.first %}{{ document.approval_tasks.first.step.name }}{% else %}-{% endif %}</dd>
+                    <dt>Файлы</dt><dd>{{ document.attachments.count }}</dd>
+                </dl>
+                <div class="actions compact">
+                    <a class="button" href="{% url 'documents:detail' document.pk %}">Открыть карточку</a>
+                </div>
+            {% else %}
+                <p class="empty">Нет документа для предпросмотра</p>
+            {% endif %}
+        {% endwith %}
+    </aside>
+</section>
+{% endblock %}

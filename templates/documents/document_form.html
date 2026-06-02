@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }} | DocFlow{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <h1>{{ title }}</h1>
+        <p>Заполните базовые реквизиты. Дополнительные поля зависят от выбранного типа документа.</p>
+    </div>
+</section>
+
+<section class="panel narrow">
+    {% if not form.instance.pk %}
+        <form method="get" class="filters type-filter" id="document-type-form">
+            <p>
+                <label for="type-selector">Тип документа</label>
+                <select id="type-selector" name="document_type">
+                    <option value="">---------</option>
+                    {% for option in document_types %}
+                        <option value="{{ option.id }}" {% if selected_type_id == option.id|stringformat:"s" %}selected{% endif %}>{{ option.name }}</option>
+                    {% endfor %}
+                </select>
+            </p>
+        </form>
+    {% endif %}
+
+    {% if selected_type_id or form.instance.pk %}
+        <form method="post" class="form" id="document-form">
+            {% csrf_token %}
+            {{ form.as_p }}
+            <div class="actions">
+                <button class="primary" type="submit">Сохранить</button>
+                <a class="button" href="{% url 'documents:my_documents' %}">Отмена</a>
+            </div>
+        </form>
+    {% else %}
+        <p>Выберите тип документа. После выбора появится форма регистрации.</p>
+    {% endif %}
+</section>
+
+<script>
+    const documentTypeForm = document.querySelector("#document-type-form");
+    const documentTypeSelect = document.querySelector("#type-selector");
+    if (documentTypeForm && documentTypeSelect) {
+        documentTypeSelect.addEventListener("change", () => {
+            if (documentTypeSelect.value) {
+                documentTypeForm.submit();
+            }
+        });
+    }
+</script>
+{% endblock %}

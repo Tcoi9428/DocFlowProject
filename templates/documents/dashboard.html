@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block title %}Рабочий стол | DocFlow{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <h1>Рабочий стол</h1>
+        <p>Оперативная сводка по документам и задачам согласования.</p>
+    </div>
+    <a class="button primary" href="{% url 'documents:create' %}">+ Создать документ</a>
+</section>
+
+<section class="metrics">
+    <div class="metric"><span>{{ created_count }}</span><p>Доступных документов</p><small>в вашем контуре</small></div>
+    <div class="metric warn"><span>{{ pending_count }}</span><p>Задач на согласовании</p><small>ожидают решения</small></div>
+    <div class="metric danger"><span>{{ overdue_count }}</span><p>Просроченных задач</p><small>к контролю</small></div>
+    <div class="metric"><span>92%</span><p>Исполнение SLA</p><small>по текущему периоду</small></div>
+</section>
+
+<section class="grid-2 equal">
+    <div class="panel">
+        <div class="toolbar">
+            <h2>Последние документы</h2>
+            <a href="{% url 'documents:my_documents' %}">Все документы</a>
+        </div>
+        {% include "documents/partials/document_table.html" with documents=recent_documents %}
+    </div>
+    <div class="panel">
+        <div class="toolbar">
+            <h2>Мои задачи</h2>
+            <a href="{% url 'documents:approval_inbox' %}">Открыть очередь</a>
+        </div>
+        {% include "documents/partials/task_table.html" with tasks=approval_tasks %}
+    </div>
+</section>
+{% endblock %}

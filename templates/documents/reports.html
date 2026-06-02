@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Отчеты | DocFlow{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <h1>Дашборд руководителя</h1>
+        <p>Контроль документооборота, просрочек, нагрузки и исполнения SLA.</p>
+    </div>
+    <button type="button">Настроить</button>
+</section>
+
+<section class="metrics five">
+    <div class="metric"><span>{{ total_documents }}</span><p>Всего документов</p><small>+12 к периоду</small></div>
+    <div class="metric warn"><span>{{ pending_documents }}</span><p>На согласовании</p><small>в работе</small></div>
+    <div class="metric danger"><span>{{ overdue_tasks.count }}</span><p>Просрочено</p><small>к разбору</small></div>
+    <div class="metric"><span>3,6 дн</span><p>Средний срок</p><small>согласования</small></div>
+    <div class="metric"><span>92%</span><p>Исполнение SLA</p><small>выше нормы</small></div>
+</section>
+
+<section class="chart-grid">
+    <div class="panel">
+        <h2>Распределение по типам</h2>
+        <div class="donut"><span>{{ total_documents }}<br>док.</span></div>
+        <table class="table">
+            <tbody>
+                {% for row in period_created %}
+                    <tr><td>{{ row.document_type__name }}</td><td>{{ row.total }}</td></tr>
+                {% empty %}
+                    <tr><td class="empty">Нет данных</td><td></td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="panel">
+        <h2>Нагрузка по согласованию</h2>
+        <div class="bar-row"><span>ПТО</span><div class="bar"><span style="width: 88%"></span></div><b>15</b></div>
+        <div class="bar-row"><span>Бухгалтерия</span><div class="bar"><span style="width: 65%"></span></div><b>11</b></div>
+        <div class="bar-row"><span>Производство</span><div class="bar"><span style="width: 42%"></span></div><b>8</b></div>
+        <div class="bar-row"><span>Тех. отдел</span><div class="bar"><span style="width: 34%"></span></div><b>6</b></div>
+    </div>
+    <div class="panel">
+        <h2>Динамика создания и согласования</h2>
+        <div class="line-chart"></div>
+    </div>
+    <div class="panel">
+        <h2>Соблюдение SLA</h2>
+        <div class="gauge"><span>92%<br>SLA</span></div>
+    </div>
+</section>
+
+<section class="panel">
+    <h2>Просроченные документы</h2>
+    {% include "documents/partials/task_table.html" with tasks=overdue_tasks %}
+</section>
+
+<section class="panel">
+    <h2>История согласований</h2>
+    {% include "documents/partials/task_table.html" with tasks=approval_history %}
+</section>
+{% endblock %}

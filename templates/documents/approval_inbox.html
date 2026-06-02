@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}На согласовании | DocFlow{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <h1>На согласовании</h1>
+        <p>Очередь решений по документам, срокам и текущим этапам маршрутов.</p>
+    </div>
+</section>
+
+<section class="metrics">
+    <div class="metric warn"><span>{{ tasks.count }}</span><p>Мои задачи</p><small>к исполнению</small></div>
+    <div class="metric"><span>{{ today_count }}</span><p>Истекают сегодня</p><small>требуют контроля</small></div>
+    <div class="metric danger"><span>{{ overdue_count }}</span><p>Просрочено</p><small>к разбору</small></div>
+    <div class="metric"><span>3</span><p>На контроле</p><small>по маршрутам</small></div>
+</section>
+
+<form method="get" class="filters">
+    <label><input type="checkbox" name="only_overdue" value="1" {% if only_overdue %}checked{% endif %}> Только просроченные</label>
+    <button type="submit">Применить</button>
+</form>
+
+<section class="approval-layout">
+    <div class="panel">
+        <h2>Документ / текущий этап</h2>
+        {% include "documents/partials/task_table.html" with tasks=tasks %}
+    </div>
+
+    <aside class="panel preview-card">
+        {% with task=tasks.first %}
+            {% if task %}
+                <div class="toolbar">
+                    <h2>{{ task.document.title }}</h2>
+                    <a class="button" href="{% url 'documents:detail' task.document.pk %}">Открыть</a>
+                </div>
+                <p><strong>{{ task.document.system_number }}</strong> · {{ task.document.document_type.name }}</p>
+                <h3>Маршрут согласования</h3>
+                <ul class="timeline">
+                    {% for item in task.document.approval_tasks.all %}
+                        <li class="{% if item.status == 'approved' %}done{% elif item.is_overdue %}danger{% elif item.status == 'pending' %}current{% endif %}">
+                            <strong>{% if item.step %}{{ item.step.name }}{% else %}Этап согласования{% endif %}</strong><br>
+                            <span>{{ item.approver.get_full_name|default:item.approver.username }}</span><br>
+                            <small>{{ item.get_status_display }} · срок {{ item.due_date|date:"d.m.Y"|default:"-" }}</small>
+                        </li>
+                    {% endfor %}
+                </ul>
+                <h3>Комментарий</h3>
+                <p>{{ task.comment|default:"Комментариев по текущему этапу пока нет." }}</p>
+                <div class="actions">
+                    <a class="button success" href="{% url 'documents:detail' task.document.pk %}">Согласовать</a>
+                    <a class="button danger" href="{% url 'documents:detail' task.document.pk %}">Отклонить</a>
+                    <a class="button primary" href="{% url 'documents:detail' task.document.pk %}">Запросить изменения</a>
+                </div>
+            {% else %}
+                <h2>Нет активных задач</h2>
+                <p>Документы, требующие вашего решения, появятся в этой панели.</p>
+            {% endif %}
+        {% endwith %}
+    </aside>
+</section>
+{% endblock %}

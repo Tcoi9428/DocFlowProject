@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Вход | DocFlow{% endblock %}
+
+{% block content %}
+<section class="auth-panel">
+    <div class="company auth-brand">
+        <span class="company-logo">
+            <img src="{% static 'img/company-logo.png' %}" alt="Сибирские инженерные системы">
+        </span>
+        <span class="company-text">
+            <strong>Сибирские</strong>
+            <small>инженерные системы</small>
+        </span>
+    </div>
+    <h1>Вход в систему</h1>
+    <form method="post" class="form">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <button class="primary" type="submit">Войти</button>
+    </form>
+</section>
+{% endblock %}

@@ -1,0 +1,105 @@
+{% load static %}
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}DocFlow{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'css/app.css' %}">
+</head>
+<body class="{% if user.is_authenticated %}is-authenticated{% else %}is-anonymous{% endif %}">
+<svg class="icon-sprite" aria-hidden="true">
+    <symbol id="icon-file" viewBox="0 0 24 24"><path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z"/><path d="M14 2v5h5"/><path d="M9 13h6"/><path d="M9 17h4"/></symbol>
+    <symbol id="icon-check" viewBox="0 0 24 24"><path d="M9 12l2 2 4-5"/><path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/></symbol>
+    <symbol id="icon-journal" viewBox="0 0 24 24"><path d="M4 4h14a2 2 0 0 1 2 2v16H6a2 2 0 0 1-2-2z"/><path d="M8 8h8"/><path d="M8 12h8"/><path d="M8 16h5"/></symbol>
+    <symbol id="icon-chart" viewBox="0 0 24 24"><path d="M4 19V5"/><path d="M4 19h18"/><path d="M8 16v-5"/><path d="M13 16V8"/><path d="M18 16v-3"/></symbol>
+    <symbol id="icon-archive" viewBox="0 0 24 24"><path d="M3 7h18"/><path d="M5 7v14h14V7"/><path d="M8 3h8l2 4H6z"/><path d="M10 12h4"/></symbol>
+    <symbol id="icon-settings" viewBox="0 0 24 24"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2 2-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V20h-4v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1-2-2 .1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H4v-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1 2-2 .1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.5V4h4v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1 2 2-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.5 1h.1v4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+    <symbol id="icon-bell" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 7h18s-3 0-3-7"/><path d="M10 19a2 2 0 0 0 4 0"/></symbol>
+    <symbol id="icon-message" viewBox="0 0 24 24"><path d="M4 5h16v12H7l-3 3z"/><path d="M8 9h8"/><path d="M8 13h5"/></symbol>
+    <symbol id="icon-logout" viewBox="0 0 24 24"><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/><path d="M21 3v18h-8"/></symbol>
+    <symbol id="icon-search" viewBox="0 0 24 24"><path d="M11 19a8 8 0 1 1 0-16 8 8 0 0 1 0 16z"/><path d="M21 21l-4.3-4.3"/></symbol>
+</svg>
+{% if user.is_authenticated %}
+    <div class="app-shell">
+        <aside class="sidebar">
+            <a class="company" href="{% url 'documents:dashboard' %}">
+                <span class="company-logo">
+                    <img src="{% static 'img/company-logo.png' %}" alt="Сибирские инженерные системы">
+                </span>
+                <span class="company-text">
+                    <strong>Сервис-Инжиниринг</strong>
+                    <small>Документооборот</small>
+                </span>
+            </a>
+
+            <nav class="side-nav">
+                <a class="{% if request.resolver_match.url_name == 'my_documents' or request.resolver_match.url_name == 'dashboard' %}active{% endif %}" href="{% url 'documents:my_documents' %}">
+                    <span class="nav-icon"><svg><use href="#icon-file"></use></svg></span> Мои документы
+                </a>
+                <a class="{% if request.resolver_match.url_name == 'approval_inbox' %}active{% endif %}" href="{% url 'documents:approval_inbox' %}">
+                    <span class="nav-icon"><svg><use href="#icon-check"></use></svg></span> На согласовании
+                </a>
+                <a class="{% if request.resolver_match.url_name == 'all_documents' %}active{% endif %}" href="{% url 'documents:all_documents' %}">
+                    <span class="nav-icon"><svg><use href="#icon-journal"></use></svg></span> Журнал
+                </a>
+                <a class="{% if request.resolver_match.url_name == 'reports' %}active{% endif %}" href="{% url 'documents:reports' %}">
+                    <span class="nav-icon"><svg><use href="#icon-chart"></use></svg></span> Отчеты
+                </a>
+                <a class="{% if request.resolver_match.url_name == 'archive' %}active{% endif %}" href="{% url 'documents:archive' %}">
+                    <span class="nav-icon"><svg><use href="#icon-archive"></use></svg></span> Архив
+                </a>
+                {% if user.is_staff %}
+                    <a href="/admin/">
+                        <span class="nav-icon"><svg><use href="#icon-settings"></use></svg></span> Администрирование
+                    </a>
+                {% endif %}
+            </nav>
+
+            <div class="sidebar-footer">
+                <span class="nav-icon">←</span>
+                <span>Свернуть меню</span>
+            </div>
+        </aside>
+
+        <div class="workspace">
+            <header class="command-bar">
+                <form class="global-search" method="get" action="{% url 'documents:all_documents' %}">
+                    <input name="query" type="search" placeholder="Поиск документов, задач, контрагентов...">
+                    <button type="submit" aria-label="Найти"><svg class="top-icon"><use href="#icon-search"></use></svg></button>
+                </form>
+                <div class="command-actions">
+                    <button class="icon-button" type="button" aria-label="Уведомления"><svg><use href="#icon-bell"></use></svg></button>
+                    <button class="icon-button" type="button" aria-label="Сообщения"><svg><use href="#icon-message"></use></svg></button>
+                    <div class="user-chip">
+                        <span class="avatar">{{ user.first_name|first|default:user.username|first|upper }}</span>
+                        <span>
+                            <strong>{{ user.get_full_name|default:user.username }}</strong>
+                            <small>{% if user.userprofile.department %}{{ user.userprofile.department.code }}{% else %}ПТО{% endif %}</small>
+                        </span>
+                    </div>
+                    <form method="post" action="{% url 'logout' %}" class="logout-form">
+                        {% csrf_token %}
+                        <button class="icon-button logout-button" type="submit" aria-label="Выйти"><svg><use href="#icon-logout"></use></svg></button>
+                    </form>
+                </div>
+            </header>
+{% endif %}
+
+            <main class="{% if user.is_authenticated %}page{% else %}auth-page{% endif %}">
+                {% if messages %}
+                    <div class="messages">
+                        {% for message in messages %}
+                            <div class="message {{ message.tags }}">{{ message }}</div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+                {% block content %}{% endblock %}
+            </main>
+
+{% if user.is_authenticated %}
+        </div>
+    </div>
+{% endif %}
+</body>
+</html>

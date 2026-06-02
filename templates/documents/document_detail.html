@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+
+{% block title %}{{ document.system_number }} | DocFlow{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <h1>{{ document.system_number }}</h1>
+        <p>{{ document.title }}</p>
+    </div>
+    <div class="actions">
+        <a class="button" href="{% url 'documents:edit' document.pk %}">Редактировать</a>
+        {% if document.status == "draft" or document.status == "returned" %}
+            <form method="post" action="{% url 'documents:submit' document.pk %}">
+                {% csrf_token %}
+                <button class="primary" type="submit">Отправить на согласование</button>
+            </form>
+        {% endif %}
+    </div>
+</section>
+
+<section class="grid-2">
+    <div class="panel">
+        <h2>Реквизиты</h2>
+        <dl class="details">
+            <dt>Тип</dt><dd>{{ document.document_type.name }}</dd>
+            <dt>Статус</dt><dd>{{ document.get_status_display }}</dd>
+            <dt>Внутренний номер</dt><dd>{{ document.internal_number|default:"-" }}</dd>
+            <dt>Инициатор</dt><dd>{{ document.author.get_full_name|default:document.author.username }}</dd>
+            <dt>Ответственный</dt><dd>{{ document.responsible.get_full_name|default:document.responsible.username|default:"-" }}</dd>
+            <dt>Подразделение</dt><dd>{{ document.department|default:"-" }}</dd>
+            <dt>Дата регистрации</dt><dd>{{ document.registration_date|date:"d.m.Y" }}</dd>
+            <dt>Срок</dt><dd>{{ document.due_date|date:"d.m.Y"|default:"-" }}</dd>
+            <dt>Контрагент</dt><dd>{{ document.counterparty|default:"-" }}</dd>
+            <dt>Сумма</dt><dd>{{ document.amount|default:"-" }}</dd>
+        </dl>
+        <h3>Краткое содержание</h3>
+        <p>{{ document.summary|linebreaksbr|default:"-" }}</p>
+        {% if document.custom_data %}
+            <h3>Пользовательские поля</h3>
+            <dl class="details">
+                {% for key, value in document.custom_data.items %}
+                    <dt>{{ key }}</dt><dd>{{ value|default:"-" }}</dd>
+                {% endfor %}
+            </dl>
+        {% endif %}
+    </div>
+
+    <div class="panel">
+        <h2>Вложения</h2>
+        <ul class="file-list">
+            {% for attachment in document.attachments.all %}
+                <li>
+                    <a href="{{ attachment.file.url }}">{{ attachment.original_name }}</a>
+                    <span>{{ attachment.size|filesizeformat }}</span>
+                </li>
+            {% empty %}
+                <li class="empty">Файлы не загружены</li>
+            {% endfor %}
+        </ul>
+        <form method="post" enctype="multipart/form-data" action="{% url 'documents:upload_attachment' document.pk %}" class="form compact">
+            {% csrf_token %}
+            {{ attachment_form.as_p }}
+            <button type="submit">Загрузить файл</button>
+        </form>
+    </div>
+</section>
+
+{% if user_task %}
+<section class="panel">
+    <h2>Ваше решение</h2>
+    <div class="approval-actions">
+        <form method="post" action="{% url 'documents:approval_action' user_task.pk 'approve' %}" class="form">
+            {% csrf_token %}
+            {{ action_form.as_p }}
+            <button class="primary" type="submit">Согласовать</button>
+        </form>
+        <form method="post" action="{% url 'documents:approval_action' user_task.pk 'reject' %}" class="form">
+            {% csrf_token %}
+            {{ action_form.as_p }}
+            <button class="danger" type="submit">Отклонить</button>
+        </form>
+        <form method="post" action="{% url 'documents:approval_action' user_task.pk 'return' %}" class="form">
+            {% csrf_token %}
+            {{ return_form.as_p }}
+            <button type="submit">Вернуть на доработку</button>
+        </form>
+        <form method="post" action="{% url 'documents:approval_action' user_task.pk 'delegate' %}" class="form">
+            {% csrf_token %}
+            {{ delegate_form.as_p }}
+            <button type="submit">Делегировать</button>
+        </form>
+    </div>
+</section>
+{% endif %}
+
+<section class="grid-2">
+    <div class="panel">
+        <h2>Маршрут и история согласования</h2>
+        {% include "documents/partials/task_table.html" with tasks=document.approval_tasks.all %}
+    </div>
+    <div class="panel">
+        <h2>Комментарии</h2>
+        <div class="comments">
+            {% for comment in document.comments.all %}
+                <article>
+                    <strong>{{ comment.author.get_full_name|default:comment.author.username }}</strong>
+                    <span>{{ comment.created_at|date:"d.m.Y H:i" }}</span>
+                    <p>{{ comment.text|linebreaksbr }}</p>
+                </article>
+            {% empty %}
+                <p class="empty">Комментариев нет</p>
+            {% endfor %}
+        </div>
+        <form method="post" action="{% url 'documents:add_comment' document.pk %}" class="form compact">
+            {% csrf_token %}
+            {{ comment_form.as_p }}
+            <button type="submit">Добавить комментарий</button>
+        </form>
+    </div>
+</section>
+
+<section class="panel">
+    <h2>Журнал действий</h2>
+    <table class="table">
+        <thead><tr><th>Дата</th><th>Пользователь</th><th>Действие</th><th>Описание</th></tr></thead>
+        <tbody>
+            {% for item in document.auditlog_set.all %}
+                <tr>
+                    <td>{{ item.created_at|date:"d.m.Y H:i" }}</td>
+                    <td>{{ item.user|default:"Система" }}</td>
+                    <td>{{ item.get_action_display }}</td>
+                    <td>{{ item.message }}</td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="4" class="empty">Нет записей</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endblock %}
