@@ -1,7 +1,15 @@
 from django.contrib.auth.models import Group, Permission, User
 from django.core.management.base import BaseCommand
 
-from documents.models import ApprovalRoute, ApprovalStep, CustomFieldDefinition, Department, DocumentType
+from documents.models import (
+    ApprovalRoute,
+    ApprovalStep,
+    ContractKind,
+    CustomFieldDefinition,
+    Department,
+    DocumentPurpose,
+    DocumentType,
+)
 
 
 class Command(BaseCommand):
@@ -49,6 +57,7 @@ class Command(BaseCommand):
             created_types[code] = document_type
 
         self._custom_fields(created_types)
+        self._contract_reference_data()
         self._routes(created_types, director, manager, accountant)
 
         self.stdout.write(self.style.SUCCESS("Demo data created. Logins: admin/admin, user/user, manager/manager."))
@@ -109,6 +118,27 @@ class Command(BaseCommand):
                         "sort_order": order,
                     },
                 )
+
+    def _contract_reference_data(self):
+        contract_kinds = [
+            ("SERVICE", "Договор оказания услуг"),
+            ("SUPPLY", "Договор поставки"),
+            ("WORKS", "Договор подряда"),
+            ("LEASE", "Договор аренды"),
+            ("NDA", "Соглашение о конфиденциальности"),
+        ]
+        for code, name in contract_kinds:
+            ContractKind.objects.get_or_create(code=code, defaults={"name": name})
+
+        purposes = [
+            ("REGISTRATION", "Регистрация нового документа"),
+            ("APPROVAL", "Согласование условий"),
+            ("PAYMENT", "Основание для оплаты"),
+            ("EXTENSION", "Продление срока действия"),
+            ("ARCHIVE", "Архивное хранение"),
+        ]
+        for code, name in purposes:
+            DocumentPurpose.objects.get_or_create(code=code, defaults={"name": name})
 
     def _routes(self, doc_types, director, manager, accountant):
         routes = {

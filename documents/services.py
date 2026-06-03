@@ -34,13 +34,37 @@ def start_approval(document, user, request=None):
         is_default=True,
         is_active=True,
     ).first()
-    if not route:
+    configured_approvers = list(document.configured_approvers.select_related("approver").order_by("order"))
+    if not route and not configured_approvers:
         raise ValueError("Для документа не выбран и не настроен маршрут согласования.")
 
-    document.route = route
+    if route:
+        document.route = route
     document.status = Document.ON_APPROVAL
     document.save(update_fields=["route", "status", "updated_at"])
     document.approval_tasks.all().delete()
+
+    if configured_approvers:
+        if route and route.route_type == ApprovalRoute.PARALLEL:
+            active_approvers = configured_approvers
+        else:
+            active_approvers = [configured_approvers[0]]
+
+        for item in active_approvers:
+            task = ApprovalTask.objects.create(
+                document=document,
+                configured_approver=item,
+                approver=item.approver,
+                due_date=timezone.localdate() + timedelta(days=item.due_days),
+            )
+            notify_user(
+                item.approver,
+                f"Документ {document.system_number} поступил на согласование",
+                f"Необходимо согласовать документ: {document.title}. Срок: {task.due_date}.",
+            )
+
+        log_action(user, document, AuditLog.UPDATE, "Документ отправлен на пользовательское согласование.", request)
+        return
 
     steps = list(route.steps.select_related("approver").order_by("order"))
     if not steps:
@@ -77,6 +101,35 @@ def approve_task(task, user, comment="", request=None):
 
     document = task.document
     route = document.route
+
+    if task.configured_approver_id:
+        if route and route.route_type == ApprovalRoute.PARALLEL:
+            if not document.approval_tasks.filter(status=ApprovalTask.PENDING).exists():
+                document.status = Document.APPROVED
+                document.save(update_fields=["status", "updated_at"])
+                notify_user(document.author, f"Документ {document.system_number} согласован", document.title)
+            return
+
+        next_approver = document.configured_approvers.filter(
+            order__gt=task.configured_approver.order
+        ).order_by("order").first()
+        if next_approver:
+            next_task = ApprovalTask.objects.create(
+                document=document,
+                configured_approver=next_approver,
+                approver=next_approver.approver,
+                due_date=timezone.localdate() + timedelta(days=next_approver.due_days),
+            )
+            notify_user(
+                next_approver.approver,
+                f"Документ {document.system_number} поступил на согласование",
+                f"Необходимо согласовать документ: {document.title}. Срок: {next_task.due_date}.",
+            )
+        else:
+            document.status = Document.APPROVED
+            document.save(update_fields=["status", "updated_at"])
+            notify_user(document.author, f"Документ {document.system_number} согласован", document.title)
+        return
 
     if route.route_type == ApprovalRoute.PARALLEL:
         if not document.approval_tasks.filter(status=ApprovalTask.PENDING).exists():

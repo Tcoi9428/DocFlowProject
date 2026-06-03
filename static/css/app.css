@@ -29,7 +29,7 @@ body {
     margin: 0;
     background: var(--bg);
     color: var(--text);
-    font-family: "Segoe UI", Arial, sans-serif;
+    font-family: "Roboto", Arial, sans-serif;
     font-size: 14px;
 }
 
@@ -370,7 +370,7 @@ p {
 }
 
 .narrow {
-    max-width: 920px;
+    max-width: 1057px;
 }
 
 .layout-two,
@@ -498,6 +498,179 @@ p {
 
 .filters p {
     margin: 0;
+}
+
+.muted {
+    color: var(--muted);
+}
+
+.document-create-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 14px;
+    align-items: start;
+}
+
+.document-main-panel,
+.approval-builder-panel {
+    margin-bottom: 0;
+}
+
+.approval-builder-panel {
+    position: sticky;
+    top: 82px;
+}
+
+.form-card {
+    padding: 0;
+    overflow: hidden;
+}
+
+.form-card-header {
+    background: #f8fafc;
+    border-bottom: 1px solid var(--line);
+    padding: 14px 16px;
+}
+
+.form-card-header h2 {
+    margin-bottom: 3px;
+}
+
+.form-card-header p {
+    margin-bottom: 0;
+    font-size: 12px;
+}
+
+.inline-form-list,
+.document-main-panel > .inline-field,
+.approval-builder-panel > .inline-field,
+.approval-builder-toolbar,
+.approver-list,
+.approval-builder-panel > .actions {
+    margin-left: 16px;
+    margin-right: 16px;
+}
+
+.inline-form-list {
+    padding-top: 14px;
+}
+
+.inline-field {
+    display: grid;
+    grid-template-columns: 185px minmax(0, 1fr);
+    gap: 12px;
+    align-items: center;
+    min-height: 42px;
+    padding: 15px 0;
+    border-bottom: 1px solid var(--soft-line);
+}
+
+.inline-field > label {
+    color: #17212f;
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 1.25;
+    margin: 0;
+}
+
+.inline-field > div {
+    min-width: 0;
+}
+
+.inline-field input,
+.inline-field select,
+.inline-field textarea {
+    width: 100%;
+    min-height: 34px;
+    border: 1px solid #cfd8e3;
+    border-radius: 6px;
+    padding: 7px 10px;
+    background: #fff;
+    color: var(--text);
+    font: inherit;
+    box-shadow: inset 0 1px 1px rgba(16, 26, 36, 0.03);
+}
+
+.inline-field input:focus,
+.inline-field select:focus,
+.inline-field textarea:focus {
+    outline: 0;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(238, 134, 44, 0.16);
+}
+
+.inline-field-wide {
+    grid-template-columns: 185px minmax(0, 1fr);
+}
+
+.inline-field-textarea {
+    align-items: start;
+    padding-top: 12px;
+    padding-bottom: 12px;
+}
+
+.inline-field-textarea textarea {
+    min-height: 92px;
+    resize: vertical;
+}
+
+.approval-template-field {
+    margin-top: 14px;
+}
+
+.form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 14px;
+}
+
+.approval-builder-toolbar {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+    margin-bottom: 12px;
+}
+
+.approver-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 14px;
+}
+
+.approver-row {
+    display: grid;
+    grid-template-columns: minmax(120px, 1fr) minmax(150px, 1.15fr) 74px 34px;
+    gap: 8px;
+    align-items: center;
+    background: #f8fafc;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px;
+}
+
+.approver-row input,
+.approver-row select {
+    width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font: inherit;
+    background: #fff;
+}
+
+.remove-approver-button {
+    min-width: 34px;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    color: var(--danger);
+}
+
+.approval-builder-panel > .actions {
+    border-top: 1px solid var(--line);
+    padding-top: 14px;
+    padding-bottom: 16px;
 }
 
 .form label,
@@ -854,11 +1027,16 @@ button:hover,
 @media (max-width: 1180px) {
     .layout-two,
     .approval-layout,
+    .document-create-layout,
     .chart-grid {
         grid-template-columns: 1fr;
     }
 
     .preview-card {
+        position: static;
+    }
+
+    .approval-builder-panel {
         position: static;
     }
 }
@@ -898,8 +1076,16 @@ button:hover,
     .metrics.embedded,
     .filters,
     .filter-grid,
+    .form-grid,
+    .approver-row,
     .grid-2.equal {
         grid-template-columns: 1fr;
+    }
+
+    .inline-field {
+        grid-template-columns: 1fr;
+        gap: 5px;
+        align-items: stretch;
     }
 
     .page {

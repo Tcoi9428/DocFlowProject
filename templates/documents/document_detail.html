@@ -24,6 +24,10 @@
         <h2>Реквизиты</h2>
         <dl class="details">
             <dt>Тип</dt><dd>{{ document.document_type.name }}</dd>
+            {% if document.document_type.code == "DOG" %}
+                <dt>Вид договора</dt><dd>{{ document.contract_kind|default:"-" }}</dd>
+                <dt>Назначение документа</dt><dd>{{ document.document_purpose|default:"-" }}</dd>
+            {% endif %}
             <dt>Статус</dt><dd>{{ document.get_status_display }}</dd>
             <dt>Внутренний номер</dt><dd>{{ document.internal_number|default:"-" }}</dd>
             <dt>Инициатор</dt><dd>{{ document.author.get_full_name|default:document.author.username }}</dd>

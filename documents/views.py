@@ -1,7 +1,9 @@
 import hashlib
+import json
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.models import User
 from django.forms import HiddenInput
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
@@ -16,7 +18,16 @@ from .forms import (
     DocumentSearchForm,
     ReturnForRevisionForm,
 )
-from .models import ApprovalTask, Attachment, AuditLog, CustomFieldDefinition, Document, DocumentType
+from .models import (
+    ApprovalRoute,
+    ApprovalTask,
+    Attachment,
+    AuditLog,
+    CustomFieldDefinition,
+    Document,
+    DocumentApprover,
+    DocumentType,
+)
 from .services import (
     approve_task,
     delegate_task,
@@ -36,6 +47,61 @@ def visible_documents_for(user):
         | Q(responsible=user)
         | Q(approval_tasks__approver=user)
     ).distinct()
+
+
+def save_configured_approvers(document, request):
+    approver_ids = request.POST.getlist("approver_user")
+    due_days = request.POST.getlist("approver_due_days")
+    names = request.POST.getlist("approver_name")
+    document.configured_approvers.all().delete()
+
+    order = 1
+    for index, approver_id in enumerate(approver_ids):
+        if not approver_id:
+            continue
+        due_days_value = due_days[index] if index < len(due_days) and due_days[index] else 3
+        name = names[index] if index < len(names) else ""
+        DocumentApprover.objects.create(
+            document=document,
+            approver_id=approver_id,
+            name=name or f"Согласование {order}",
+            order=order,
+            due_days=due_days_value,
+        )
+        order += 1
+
+
+def document_form_context(form, title, selected_type_id="", document=None):
+    users = User.objects.filter(is_active=True).order_by("last_name", "first_name", "username")
+    routes = ApprovalRoute.objects.filter(is_active=True).select_related("document_type").prefetch_related(
+        "steps",
+        "steps__approver",
+    )
+    route_templates = {}
+    for route in routes:
+        route_templates[str(route.id)] = [
+            {
+                "user_id": step.approver_id,
+                "name": step.name,
+                "due_days": step.due_days,
+            }
+            for step in route.steps.all().order_by("order")
+        ]
+
+    configured_approvers = []
+    if document:
+        configured_approvers = list(document.configured_approvers.select_related("approver").order_by("order"))
+
+    return {
+        "form": form,
+        "title": title,
+        "document": document,
+        "document_types": DocumentType.objects.filter(is_active=True).order_by("name"),
+        "selected_type_id": str(selected_type_id or ""),
+        "users": users,
+        "configured_approvers": configured_approvers,
+        "route_templates_json": json.dumps(route_templates, ensure_ascii=False),
+    }
 
 
 @login_required
@@ -159,6 +225,7 @@ def document_create(request):
             if not document.responsible:
                 document.responsible = request.user
             document.save()
+            save_configured_approvers(document, request)
             log_action(request.user, document, AuditLog.CREATE, "Документ создан.", request)
             messages.success(request, f"Документ {document.system_number} создан.")
             return redirect("documents:detail", pk=document.pk)
@@ -169,16 +236,7 @@ def document_create(request):
         form = DocumentForm(initial=initial, custom_field_definitions=custom_fields)
     if selected_type_id:
         form.fields["document_type"].widget = HiddenInput()
-    return render(
-        request,
-        "documents/document_form.html",
-        {
-            "form": form,
-            "title": "Создание документа",
-            "document_types": DocumentType.objects.filter(is_active=True).order_by("name"),
-            "selected_type_id": str(selected_type_id or ""),
-        },
-    )
+    return render(request, "documents/document_form.html", document_form_context(form, "Создание документа", selected_type_id))
 
 
 @login_required
@@ -192,12 +250,17 @@ def document_edit(request, pk):
         form = DocumentForm(request.POST, instance=document, custom_field_definitions=custom_fields)
         if form.is_valid():
             document = form.save()
+            save_configured_approvers(document, request)
             log_action(request.user, document, AuditLog.UPDATE, "Документ изменен.", request)
             messages.success(request, "Изменения сохранены.")
             return redirect("documents:detail", pk=document.pk)
     else:
         form = DocumentForm(instance=document, custom_field_definitions=custom_fields)
-    return render(request, "documents/document_form.html", {"form": form, "title": "Редактирование документа"})
+    return render(
+        request,
+        "documents/document_form.html",
+        document_form_context(form, "Редактирование документа", document.document_type_id, document),
+    )
 
 
 @login_required

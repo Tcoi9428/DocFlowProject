@@ -1,7 +1,17 @@
 from django.contrib.auth.models import User
 from django.test import TestCase
 
-from .models import ApprovalRoute, ApprovalStep, ApprovalTask, Document, DocumentType
+from .forms import DocumentForm
+from .models import (
+    ApprovalRoute,
+    ApprovalStep,
+    ApprovalTask,
+    ContractKind,
+    Document,
+    DocumentApprover,
+    DocumentPurpose,
+    DocumentType,
+)
 from .services import approve_task, start_approval
 
 
@@ -11,6 +21,9 @@ class DocumentWorkflowTests(TestCase):
         self.manager = User.objects.create_user(username="manager", password="test")
         self.director = User.objects.create_user(username="director", password="test")
         self.document_type = DocumentType.objects.create(name="Договоры", code="DOG")
+        self.memo_type = DocumentType.objects.create(name="Служебные записки", code="SZ")
+        ContractKind.objects.create(name="Договор поставки", code="SUPPLY")
+        DocumentPurpose.objects.create(name="Основание для оплаты", code="PAYMENT")
         self.route = ApprovalRoute.objects.create(
             name="Типовой маршрут",
             document_type=self.document_type,
@@ -61,5 +74,31 @@ class DocumentWorkflowTests(TestCase):
         self.assertContains(response, "addEventListener")
         self.assertNotContains(response, "window.location")
         self.assertNotContains(response, "Обновить поля")
+
+    def test_contract_fields_are_visible_only_for_contract_documents(self):
+        contract_form = DocumentForm(initial={"document_type": self.document_type.id})
+        memo_form = DocumentForm(initial={"document_type": self.memo_type.id})
+
+        self.assertIn("contract_kind", contract_form.fields)
+        self.assertIn("document_purpose", contract_form.fields)
+        self.assertNotIn("contract_kind", memo_form.fields)
+        self.assertNotIn("document_purpose", memo_form.fields)
+
+    def test_custom_document_approvers_drive_sequential_approval(self):
+        document = Document.objects.create(
+            document_type=self.document_type,
+            title="Договор по пользовательскому маршруту",
+            author=self.author,
+            route=self.route,
+        )
+        DocumentApprover.objects.create(document=document, approver=self.manager, name="Первый этап", order=1)
+        DocumentApprover.objects.create(document=document, approver=self.director, name="Второй этап", order=2)
+
+        start_approval(document, self.author)
+        first_task = ApprovalTask.objects.get(document=document, approver=self.manager)
+
+        approve_task(first_task, self.manager, "OK")
+
+        self.assertTrue(ApprovalTask.objects.filter(document=document, approver=self.director).exists())
 
 # Create your tests here.

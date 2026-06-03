@@ -48,6 +48,7 @@ class UserProfile(TimeStampedModel):
         null=True,
         blank=True,
     )
+    patronymic = models.CharField("Отчество", max_length=150, blank=True)
     position = models.CharField("Должность", max_length=150, blank=True)
     phone = models.CharField("Телефон", max_length=50, blank=True)
 
@@ -73,6 +74,36 @@ class DocumentType(TimeStampedModel):
 
     def __str__(self):
         return f"{self.name} ({self.code})"
+
+
+class ContractKind(TimeStampedModel):
+    name = models.CharField("Наименование", max_length=150, unique=True)
+    code = models.CharField("Код", max_length=30, unique=True)
+    description = models.TextField("Описание", blank=True)
+    is_active = models.BooleanField("Активно", default=True)
+
+    class Meta:
+        verbose_name = "Вид договора"
+        verbose_name_plural = "Виды договоров"
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class DocumentPurpose(TimeStampedModel):
+    name = models.CharField("Наименование", max_length=150, unique=True)
+    code = models.CharField("Код", max_length=30, unique=True)
+    description = models.TextField("Описание", blank=True)
+    is_active = models.BooleanField("Активно", default=True)
+
+    class Meta:
+        verbose_name = "Назначение документа"
+        verbose_name_plural = "Назначения документов"
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
 
 
 class CustomFieldDefinition(TimeStampedModel):
@@ -195,6 +226,20 @@ class Document(TimeStampedModel):
     ]
 
     document_type = models.ForeignKey(DocumentType, verbose_name="Тип документа", on_delete=models.PROTECT)
+    contract_kind = models.ForeignKey(
+        ContractKind,
+        verbose_name="Вид договора",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+    )
+    document_purpose = models.ForeignKey(
+        DocumentPurpose,
+        verbose_name="Назначение документа",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+    )
     title = models.CharField("Тема", max_length=250)
     system_number = models.CharField("Системный номер", max_length=40, unique=True, blank=True)
     internal_number = models.CharField("Внутренний номер компании", max_length=80, blank=True)
@@ -270,6 +315,32 @@ class Document(TimeStampedModel):
         return self.approval_tasks.filter(approver=user).exists()
 
 
+class DocumentApprover(TimeStampedModel):
+    document = models.ForeignKey(
+        Document,
+        verbose_name="Документ",
+        on_delete=models.CASCADE,
+        related_name="configured_approvers",
+    )
+    approver = models.ForeignKey(
+        User,
+        verbose_name="Согласующий",
+        on_delete=models.PROTECT,
+        related_name="configured_document_approvals",
+    )
+    name = models.CharField("Этап согласования", max_length=150, blank=True)
+    order = models.PositiveSmallIntegerField("Порядок", default=1)
+    due_days = models.PositiveSmallIntegerField("Срок, дней", default=3)
+
+    class Meta:
+        verbose_name = "Согласующий документа"
+        verbose_name_plural = "Согласующие документа"
+        ordering = ["document", "order", "id"]
+
+    def __str__(self):
+        return f"{self.document.system_number}: {self.order}. {self.approver}"
+
+
 def document_upload_path(instance, filename):
     ext = Path(filename).suffix.lower()
     return f"documents/{instance.document.id}/{uuid4().hex}{ext}"
@@ -322,6 +393,13 @@ class ApprovalTask(TimeStampedModel):
         related_name="approval_tasks",
     )
     step = models.ForeignKey(ApprovalStep, verbose_name="Этап", on_delete=models.SET_NULL, null=True, blank=True)
+    configured_approver = models.ForeignKey(
+        DocumentApprover,
+        verbose_name="Согласующий документа",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
     approver = models.ForeignKey(User, verbose_name="Согласующий", on_delete=models.PROTECT, related_name="approval_tasks")
     status = models.CharField("Статус", max_length=20, choices=STATUSES, default=PENDING)
     due_date = models.DateField("Срок", null=True, blank=True)

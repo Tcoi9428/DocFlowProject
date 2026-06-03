@@ -7,10 +7,13 @@ from .models import (
     ApprovalTask,
     Attachment,
     AuditLog,
+    ContractKind,
     CustomFieldDefinition,
     Department,
     Document,
+    DocumentApprover,
     DocumentComment,
+    DocumentPurpose,
     DocumentType,
     UserProfile,
 )
@@ -25,9 +28,23 @@ class DepartmentAdmin(admin.ModelAdmin):
 
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
-    list_display = ["user", "department", "position", "phone"]
-    search_fields = ["user__username", "user__first_name", "user__last_name", "position"]
+    list_display = ["user", "patronymic", "department", "position", "phone"]
+    search_fields = ["user__username", "user__first_name", "user__last_name", "patronymic", "position"]
     list_filter = ["department"]
+
+
+@admin.register(ContractKind)
+class ContractKindAdmin(admin.ModelAdmin):
+    list_display = ["name", "code", "is_active"]
+    search_fields = ["name", "code", "description"]
+    list_filter = ["is_active"]
+
+
+@admin.register(DocumentPurpose)
+class DocumentPurposeAdmin(admin.ModelAdmin):
+    list_display = ["name", "code", "is_active"]
+    search_fields = ["name", "code", "description"]
+    list_filter = ["is_active"]
 
 
 class CustomFieldInline(admin.TabularInline):
@@ -68,6 +85,11 @@ class ApprovalTaskInline(admin.TabularInline):
     readonly_fields = ["completed_at"]
 
 
+class DocumentApproverInline(admin.TabularInline):
+    model = DocumentApprover
+    extra = 0
+
+
 class DocumentCommentInline(admin.TabularInline):
     model = DocumentComment
     extra = 0
@@ -80,9 +102,10 @@ class DocumentAdmin(admin.ModelAdmin):
     list_filter = ["document_type", "status", "registration_date", "is_deleted"]
     search_fields = ["system_number", "internal_number", "title", "counterparty"]
     readonly_fields = ["system_number", "created_at", "updated_at", "archived_at"]
-    inlines = [AttachmentInline, ApprovalTaskInline, DocumentCommentInline]
+    inlines = [DocumentApproverInline, AttachmentInline, ApprovalTaskInline, DocumentCommentInline]
     fieldsets = [
         ("Регистрация", {"fields": ["document_type", "title", "system_number", "internal_number", "status"]}),
+        ("Договор", {"fields": ["contract_kind", "document_purpose"]}),
         ("Ответственные", {"fields": ["author", "responsible", "department", "route"]}),
         ("Сроки и реквизиты", {"fields": ["registration_date", "due_date", "amount", "counterparty"]}),
         ("Содержание", {"fields": ["summary", "custom_data"]}),
@@ -95,6 +118,13 @@ class AttachmentAdmin(admin.ModelAdmin):
     list_display = ["original_name", "document", "size", "uploaded_by", "created_at"]
     search_fields = ["original_name", "document__system_number", "content_hash"]
     readonly_fields = ["content_hash", "size", "created_at", "updated_at"]
+
+
+@admin.register(DocumentApprover)
+class DocumentApproverAdmin(admin.ModelAdmin):
+    list_display = ["document", "order", "name", "approver", "due_days"]
+    list_filter = ["due_days"]
+    search_fields = ["document__system_number", "document__title", "approver__username", "name"]
 
 
 @admin.register(ApprovalTask)
