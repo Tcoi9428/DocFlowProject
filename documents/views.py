@@ -27,6 +27,7 @@ from .models import (
     Document,
     DocumentApprover,
     DocumentType,
+    Notification,
 )
 from .services import (
     approve_task,
@@ -35,11 +36,20 @@ from .services import (
     reject_task,
     return_for_revision,
     start_approval,
+    create_notification,
 )
 
 
 def visible_documents_for(user):
-    queryset = Document.objects.select_related("document_type", "author", "responsible", "department", "route")
+    queryset = Document.objects.select_related(
+        "document_type",
+        "author",
+        "author__userprofile",
+        "responsible",
+        "responsible__userprofile",
+        "department",
+        "route",
+    )
     if user.is_superuser or user.has_perm("documents.view_all_documents"):
         return queryset
     return queryset.filter(
@@ -72,10 +82,11 @@ def save_configured_approvers(document, request):
 
 
 def document_form_context(form, title, selected_type_id="", document=None):
-    users = User.objects.filter(is_active=True).order_by("last_name", "first_name", "username")
+    users = User.objects.filter(is_active=True).select_related("userprofile").order_by("last_name", "first_name", "username")
     routes = ApprovalRoute.objects.filter(is_active=True).select_related("document_type").prefetch_related(
         "steps",
         "steps__approver",
+        "steps__approver__userprofile",
     )
     route_templates = {}
     for route in routes:
@@ -90,7 +101,7 @@ def document_form_context(form, title, selected_type_id="", document=None):
 
     configured_approvers = []
     if document:
-        configured_approvers = list(document.configured_approvers.select_related("approver").order_by("order"))
+        configured_approvers = list(document.configured_approvers.select_related("approver", "approver__userprofile").order_by("order"))
 
     return {
         "form": form,
@@ -113,7 +124,7 @@ def dashboard(request):
         "pending_count": approval_tasks.count(),
         "overdue_count": approval_tasks.filter(due_date__lt=timezone.localdate()).count(),
         "recent_documents": my_documents[:5],
-        "approval_tasks": approval_tasks.select_related("document", "document__document_type")[:5],
+        "approval_tasks": approval_tasks.select_related("document", "document__document_type", "approver", "approver__userprofile")[:5],
     }
     return render(request, "documents/dashboard.html", context)
 
@@ -139,7 +150,22 @@ def my_documents(request):
 
 @login_required
 def approval_inbox(request):
-    tasks = ApprovalTask.objects.select_related("document", "document__document_type").filter(
+    tasks = ApprovalTask.objects.select_related(
+        "document",
+        "document__document_type",
+        "document__author",
+        "document__responsible",
+        "document__author__userprofile",
+        "document__responsible__userprofile",
+        "approver",
+        "approver__userprofile",
+        "step",
+    ).prefetch_related(
+        "document__approval_tasks",
+        "document__approval_tasks__approver",
+        "document__approval_tasks__approver__userprofile",
+        "document__approval_tasks__step",
+    ).filter(
         approver=request.user,
         status=ApprovalTask.PENDING,
     )
@@ -158,6 +184,16 @@ def approval_inbox(request):
             "today_count": today_count,
         },
     )
+
+
+@login_required
+def notification_open(request, pk):
+    notification = get_object_or_404(Notification, pk=pk, recipient=request.user)
+    if not notification.is_read:
+        notification.is_read = True
+        notification.read_at = timezone.now()
+        notification.save(update_fields=["is_read", "read_at", "updated_at"])
+    return redirect(notification.link_url or "documents:approval_inbox")
 
 
 @login_required
@@ -187,7 +223,20 @@ def archive(request):
 
 @login_required
 def document_detail(request, pk):
-    document = get_object_or_404(visible_documents_for(request.user), pk=pk)
+    document = get_object_or_404(
+        visible_documents_for(request.user).prefetch_related(
+            "approval_tasks",
+            "approval_tasks__approver",
+            "approval_tasks__approver__userprofile",
+            "comments",
+            "comments__author",
+            "comments__author__userprofile",
+            "auditlog_set",
+            "auditlog_set__user",
+            "auditlog_set__user__userprofile",
+        ),
+        pk=pk,
+    )
     comment_form = CommentForm()
     attachment_form = AttachmentForm()
     user_task = document.approval_tasks.filter(approver=request.user, status=ApprovalTask.PENDING).first()
@@ -311,6 +360,18 @@ def add_comment(request, pk):
             comment.author = request.user
             comment.save()
             log_action(request.user, document, AuditLog.UPDATE, "Добавлен комментарий.", request)
+            recipients = {document.author, document.responsible}
+            recipients.update(task.approver for task in document.approval_tasks.all())
+            recipients.discard(None)
+            recipients.discard(request.user)
+            for recipient in recipients:
+                create_notification(
+                    recipient,
+                    document,
+                    Notification.COMMENT_ADDED,
+                    f"К документу {document.system_number} добавлен комментарий",
+                    comment.text,
+                )
     return redirect("documents:detail", pk=document.pk)
 
 
@@ -363,7 +424,7 @@ def reports(request):
     documents = visible_documents_for(request.user).filter(is_deleted=False)
     period_created = documents.values("document_type__name").annotate(total=Count("id")).order_by("document_type__name")
     pending_documents = documents.filter(status=Document.ON_APPROVAL).count()
-    overdue_tasks = ApprovalTask.objects.select_related("document", "approver").filter(
+    overdue_tasks = ApprovalTask.objects.select_related("document", "approver", "approver__userprofile").filter(
         document__in=documents,
         status=ApprovalTask.PENDING,
         due_date__lt=timezone.localdate(),
@@ -373,7 +434,7 @@ def reports(request):
         "period_created": period_created,
         "pending_documents": pending_documents,
         "overdue_tasks": overdue_tasks,
-        "approval_history": ApprovalTask.objects.select_related("document", "approver").filter(document__in=documents).exclude(status=ApprovalTask.PENDING)[:50],
+        "approval_history": ApprovalTask.objects.select_related("document", "approver", "approver__userprofile").filter(document__in=documents).exclude(status=ApprovalTask.PENDING)[:50],
         "archive_count": documents.filter(status=Document.ARCHIVED).count(),
     }
     return render(request, "documents/reports.html", context)

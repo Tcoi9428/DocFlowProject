@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load user_display %}
 
 {% block title %}{{ title }} | DocFlow{% endblock %}
 
@@ -43,12 +44,12 @@
                 <div class="inline-field">{{ form.internal_number.label_tag }}<div>{{ form.internal_number }}{{ form.internal_number.errors }}</div></div>
                 {% if form.contract_kind %}<div class="inline-field">{{ form.contract_kind.label_tag }}<div>{{ form.contract_kind }}{{ form.contract_kind.errors }}</div></div>{% endif %}
                 {% if form.document_purpose %}<div class="inline-field">{{ form.document_purpose.label_tag }}<div>{{ form.document_purpose }}{{ form.document_purpose.errors }}</div></div>{% endif %}
+                {% if form.counterparty %}<div class="inline-field">{{ form.counterparty.label_tag }}<div>{{ form.counterparty }}{{ form.counterparty.errors }}</div></div>{% endif %}
                 <div class="inline-field">{{ form.responsible.label_tag }}<div>{{ form.responsible }}{{ form.responsible.errors }}</div></div>
                 <div class="inline-field">{{ form.department.label_tag }}<div>{{ form.department }}{{ form.department.errors }}</div></div>
                 <div class="inline-field">{{ form.registration_date.label_tag }}<div>{{ form.registration_date }}{{ form.registration_date.errors }}</div></div>
                 <div class="inline-field">{{ form.due_date.label_tag }}<div>{{ form.due_date }}{{ form.due_date.errors }}</div></div>
                 {% if form.amount %}<div class="inline-field">{{ form.amount.label_tag }}<div>{{ form.amount }}{{ form.amount.errors }}</div></div>{% endif %}
-                {% if form.counterparty %}<div class="inline-field">{{ form.counterparty.label_tag }}<div>{{ form.counterparty }}{{ form.counterparty.errors }}</div></div>{% endif %}
             </div>
 
             <div class="inline-field inline-field-textarea">{{ form.summary.label_tag }}<div>{{ form.summary }}{{ form.summary.errors }}</div></div>
@@ -75,6 +76,12 @@
                 <button type="button" id="clear-approvers-button">Очистить</button>
             </div>
 
+            <div class="approver-list-header">
+                <span>Название этапа</span>
+                <span>Согласующий</span>
+                <span>Срок, дней</span>
+                <span></span>
+            </div>
             <div id="approver-list" class="approver-list">
                 {% for item in configured_approvers %}
                     <div class="approver-row">
@@ -82,7 +89,7 @@
                         <select name="approver_user">
                             <option value="">---------</option>
                             {% for user_item in users %}
-                                <option value="{{ user_item.id }}" {% if user_item.id == item.approver_id %}selected{% endif %}>{{ user_item.get_full_name|default:user_item.username }}</option>
+                                <option value="{{ user_item.id }}" {% if user_item.id == item.approver_id %}selected{% endif %}>{{ user_item|user_label }}</option>
                             {% endfor %}
                         </select>
                         <input type="number" name="approver_due_days" value="{{ item.due_days }}" min="1" max="60" aria-label="Срок согласования, дней">
@@ -97,7 +104,7 @@
                     <select name="approver_user">
                         <option value="">---------</option>
                         {% for user_item in users %}
-                            <option value="{{ user_item.id }}">{{ user_item.get_full_name|default:user_item.username }}</option>
+                            <option value="{{ user_item.id }}">{{ user_item|user_label }}</option>
                         {% endfor %}
                     </select>
                     <input type="number" name="approver_due_days" value="3" min="1" max="60" aria-label="Срок согласования, дней">

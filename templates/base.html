@@ -1,4 +1,4 @@
-{% load static %}
+{% load static user_display %}
 <!doctype html>
 <html lang="ru">
 <head>
@@ -25,7 +25,7 @@
         <aside class="sidebar">
             <a class="company" href="{% url 'documents:dashboard' %}">
                 <span class="company-logo">
-                    <img src="{% static 'img/company-logo.png' %}" alt="Сибирские инженерные системы">
+                    <img src="{% static 'img/company-logo.png' %}" alt="Сервис-Инжиниринг">
                 </span>
                 <span class="company-text">
                     <strong>Сервис-Инжиниринг</strong>
@@ -38,7 +38,9 @@
                     <span class="nav-icon"><svg><use href="#icon-file"></use></svg></span> Мои документы
                 </a>
                 <a class="{% if request.resolver_match.url_name == 'approval_inbox' %}active{% endif %}" href="{% url 'documents:approval_inbox' %}">
-                    <span class="nav-icon"><svg><use href="#icon-check"></use></svg></span> На согласовании
+                    <span class="nav-icon"><svg><use href="#icon-check"></use></svg></span>
+                    <span>На согласовании</span>
+                    {% if approval_badge_count %}<span class="menu-badge">{{ approval_badge_count }}</span>{% endif %}
                 </a>
                 <a class="{% if request.resolver_match.url_name == 'all_documents' %}active{% endif %}" href="{% url 'documents:all_documents' %}">
                     <span class="nav-icon"><svg><use href="#icon-journal"></use></svg></span> Журнал
@@ -69,13 +71,30 @@
                     <button type="submit" aria-label="Найти"><svg class="top-icon"><use href="#icon-search"></use></svg></button>
                 </form>
                 <div class="command-actions">
-                    <button class="icon-button" type="button" aria-label="Уведомления"><svg><use href="#icon-bell"></use></svg></button>
+                    <div class="notification-menu">
+                        <button class="icon-button notification-toggle" type="button" aria-label="Уведомления">
+                            <svg><use href="#icon-bell"></use></svg>
+                            {% if unread_notifications_count %}<span class="top-badge">{{ unread_notifications_count }}</span>{% endif %}
+                        </button>
+                        <div class="notification-panel">
+                            <div class="notification-panel-title">Уведомления</div>
+                            {% for notification in recent_notifications %}
+                                <a class="notification-item {% if not notification.is_read %}unread{% endif %}" href="{% url 'documents:notification_open' notification.pk %}">
+                                    <strong>{{ notification.title }}</strong>
+                                    <span>{{ notification.message }}</span>
+                                    <small>{{ notification.created_at|date:"d.m.Y H:i" }}</small>
+                                </a>
+                            {% empty %}
+                                <div class="notification-empty">Нет уведомлений</div>
+                            {% endfor %}
+                        </div>
+                    </div>
                     <button class="icon-button" type="button" aria-label="Сообщения"><svg><use href="#icon-message"></use></svg></button>
                     <div class="user-chip">
-                        <span class="avatar">{{ user.first_name|first|default:user.username|first|upper }}</span>
+                        <span class="avatar">{{ user|user_name|first|upper }}</span>
                         <span>
-                            <strong>{{ user.get_full_name|default:user.username }}</strong>
-                            <small>{% if user.userprofile.department %}{{ user.userprofile.department.code }}{% else %}ПТО{% endif %}</small>
+                            <strong>{{ user|user_name }}</strong>
+                            {% with position=user|user_job %}<small>{% if position %}({{ position }}){% else %}-{% endif %}</small>{% endwith %}
                         </span>
                     </div>
                     <form method="post" action="{% url 'logout' %}" class="logout-form">

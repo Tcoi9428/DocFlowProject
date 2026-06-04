@@ -10,6 +10,7 @@ from .models import (
     Document,
     DocumentApprover,
     DocumentPurpose,
+    Notification,
     DocumentType,
 )
 from .services import approve_task, start_approval
@@ -22,6 +23,7 @@ class DocumentWorkflowTests(TestCase):
         self.director = User.objects.create_user(username="director", password="test")
         self.document_type = DocumentType.objects.create(name="Договоры", code="DOG")
         self.memo_type = DocumentType.objects.create(name="Служебные записки", code="SZ")
+        self.order_type = DocumentType.objects.create(name="Приказы", code="PRK")
         ContractKind.objects.create(name="Договор поставки", code="SUPPLY")
         DocumentPurpose.objects.create(name="Основание для оплаты", code="PAYMENT")
         self.route = ApprovalRoute.objects.create(
@@ -84,6 +86,12 @@ class DocumentWorkflowTests(TestCase):
         self.assertNotIn("contract_kind", memo_form.fields)
         self.assertNotIn("document_purpose", memo_form.fields)
 
+    def test_order_form_hides_counterparty_and_amount(self):
+        order_form = DocumentForm(initial={"document_type": self.order_type.id})
+
+        self.assertNotIn("counterparty", order_form.fields)
+        self.assertNotIn("amount", order_form.fields)
+
     def test_custom_document_approvers_drive_sequential_approval(self):
         document = Document.objects.create(
             document_type=self.document_type,
@@ -100,5 +108,25 @@ class DocumentWorkflowTests(TestCase):
         approve_task(first_task, self.manager, "OK")
 
         self.assertTrue(ApprovalTask.objects.filter(document=document, approver=self.director).exists())
+
+    def test_start_approval_creates_notification_for_approver(self):
+        document = Document.objects.create(
+            document_type=self.document_type,
+            title="Договор с уведомлением",
+            author=self.author,
+            route=self.route,
+        )
+        DocumentApprover.objects.create(document=document, approver=self.manager, name="Первый этап", order=1)
+
+        start_approval(document, self.author)
+
+        self.assertTrue(
+            Notification.objects.filter(
+                recipient=self.manager,
+                document=document,
+                notification_type=Notification.APPROVAL_REQUIRED,
+                is_read=False,
+            ).exists()
+        )
 
 # Create your tests here.

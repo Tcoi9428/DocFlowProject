@@ -8,6 +8,8 @@ from django.db import models
 from django.db.models import Max
 from django.utils import timezone
 
+from .user_display import user_full_name
+
 
 class TimeStampedModel(models.Model):
     created_at = models.DateTimeField("Создано", auto_now_add=True)
@@ -57,7 +59,7 @@ class UserProfile(TimeStampedModel):
         verbose_name_plural = "Профили пользователей"
 
     def __str__(self):
-        return self.user.get_full_name() or self.user.username
+        return user_full_name(self.user)
 
 
 class DocumentType(TimeStampedModel):
@@ -439,6 +441,46 @@ class DocumentComment(TimeStampedModel):
 
     def __str__(self):
         return f"{self.author}: {self.created_at:%d.%m.%Y %H:%M}"
+
+
+class Notification(TimeStampedModel):
+    APPROVAL_REQUIRED = "approval_required"
+    STATUS_CHANGED = "status_changed"
+    COMMENT_ADDED = "comment_added"
+    TYPES = [
+        (APPROVAL_REQUIRED, "Требуется согласование"),
+        (STATUS_CHANGED, "Изменение статуса"),
+        (COMMENT_ADDED, "Добавлен комментарий"),
+    ]
+
+    recipient = models.ForeignKey(
+        User,
+        verbose_name="Получатель",
+        on_delete=models.CASCADE,
+        related_name="notifications",
+    )
+    document = models.ForeignKey(
+        Document,
+        verbose_name="Документ",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="notifications",
+    )
+    notification_type = models.CharField("Тип уведомления", max_length=40, choices=TYPES)
+    title = models.CharField("Заголовок", max_length=200)
+    message = models.TextField("Текст")
+    link_url = models.CharField("Ссылка", max_length=300, blank=True)
+    is_read = models.BooleanField("Прочитано", default=False)
+    read_at = models.DateTimeField("Дата прочтения", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Уведомление"
+        verbose_name_plural = "Уведомления"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.recipient}: {self.title}"
 
 
 class AuditLog(TimeStampedModel):

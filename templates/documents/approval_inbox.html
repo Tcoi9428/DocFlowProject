@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load user_display %}
 
 {% block title %}На согласовании | DocFlow{% endblock %}
 
@@ -22,42 +23,108 @@
     <button type="submit">Применить</button>
 </form>
 
-<section class="approval-layout">
+<section class="approval-layout" data-approval-inbox>
     <div class="panel">
         <h2>Документ / текущий этап</h2>
-        {% include "documents/partials/task_table.html" with tasks=tasks %}
+        <div class="table-wrap">
+            <table class="table approval-task-table">
+                <thead>
+                    <tr>
+                        <th>Документ</th>
+                        <th>Текущий этап</th>
+                        <th>Ответственный</th>
+                        <th>Срок</th>
+                        <th>Статус</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for task in tasks %}
+                        <tr class="approval-task-row {% if forloop.first %}is-selected{% endif %}" data-approval-task-row="{{ task.pk }}" tabindex="0">
+                            <td>
+                                <strong>{{ task.document.system_number }}</strong><br>
+                                {{ task.document.title }}
+                            </td>
+                            <td>{% if task.step %}{{ task.step.name }}{% else %}Этап согласования{% endif %}</td>
+                            <td>{% include "documents/partials/user_display.html" with person=task.approver %}</td>
+                            <td class="{% if task.is_overdue %}danger-text{% endif %}">{{ task.due_date|date:"d.m.Y"|default:"-" }}</td>
+                            <td>
+                                <span class="badge {% if task.is_overdue %}badge-danger{% elif task.status == 'approved' %}badge-success{% elif task.status == 'pending' %}badge-warn{% endif %}">
+                                    {% if task.is_overdue %}Просрочено{% else %}{{ task.get_status_display }}{% endif %}
+                                </span>
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="5" class="empty">Нет задач</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </div>
 
-    <aside class="panel preview-card">
-        {% with task=tasks.first %}
-            {% if task %}
+    <aside class="panel preview-card approval-preview-card">
+        {% for task in tasks %}
+            <div class="approval-preview-panel" data-approval-task-panel="{{ task.pk }}" {% if not forloop.first %}hidden{% endif %}>
                 <div class="toolbar">
-                    <h2>{{ task.document.title }}</h2>
-                    <a class="button" href="{% url 'documents:detail' task.document.pk %}">Открыть</a>
+                    <div>
+                        <h2>{{ task.document.title }}</h2>
+                        <p class="muted">{{ task.document.system_number }} · {{ task.document.document_type.name }}</p>
+                    </div>
+                    <a class="button" href="{% url 'documents:detail' task.document.pk %}">Открыть карточку</a>
                 </div>
-                <p><strong>{{ task.document.system_number }}</strong> · {{ task.document.document_type.name }}</p>
+
+                <dl class="details approval-preview-details">
+                    <dt>Инициатор</dt><dd>{% include "documents/partials/user_display.html" with person=task.document.author %}</dd>
+                    <dt>Ответственный</dt><dd>{% include "documents/partials/user_display.html" with person=task.document.responsible %}</dd>
+                    <dt>Текущий этап</dt><dd>{% if task.step %}{{ task.step.name }}{% else %}Этап согласования{% endif %}</dd>
+                    <dt>Срок</dt><dd class="{% if task.is_overdue %}danger-text{% endif %}">{{ task.due_date|date:"d.m.Y"|default:"-" }}</dd>
+                </dl>
+
                 <h3>Маршрут согласования</h3>
                 <ul class="timeline">
                     {% for item in task.document.approval_tasks.all %}
-                        <li class="{% if item.status == 'approved' %}done{% elif item.is_overdue %}danger{% elif item.status == 'pending' %}current{% endif %}">
+                        <li class="{% if item.status == 'approved' %}done{% elif item.is_overdue %}danger{% elif item.pk == task.pk %}current{% elif item.status == 'pending' %}current{% endif %}">
                             <strong>{% if item.step %}{{ item.step.name }}{% else %}Этап согласования{% endif %}</strong><br>
-                            <span>{{ item.approver.get_full_name|default:item.approver.username }}</span><br>
+                            {% include "documents/partials/user_display.html" with person=item.approver %}<br>
                             <small>{{ item.get_status_display }} · срок {{ item.due_date|date:"d.m.Y"|default:"-" }}</small>
                         </li>
                     {% endfor %}
                 </ul>
-                <h3>Комментарий</h3>
+
+                <h3>Комментарий текущего этапа</h3>
                 <p>{{ task.comment|default:"Комментариев по текущему этапу пока нет." }}</p>
-                <div class="actions">
-                    <a class="button success" href="{% url 'documents:detail' task.document.pk %}">Согласовать</a>
-                    <a class="button danger" href="{% url 'documents:detail' task.document.pk %}">Отклонить</a>
-                    <a class="button primary" href="{% url 'documents:detail' task.document.pk %}">Запросить изменения</a>
-                </div>
-            {% else %}
-                <h2>Нет активных задач</h2>
-                <p>Документы, требующие вашего решения, появятся в этой панели.</p>
-            {% endif %}
-        {% endwith %}
+            </div>
+        {% empty %}
+            <h2>Нет активных задач</h2>
+            <p>Документы, требующие вашего решения, появятся в этой панели.</p>
+        {% endfor %}
     </aside>
 </section>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        var rows = document.querySelectorAll("[data-approval-task-row]");
+        var panels = document.querySelectorAll("[data-approval-task-panel]");
+
+        function selectTask(taskId) {
+            rows.forEach(function (row) {
+                row.classList.toggle("is-selected", row.dataset.approvalTaskRow === taskId);
+            });
+            panels.forEach(function (panel) {
+                panel.hidden = panel.dataset.approvalTaskPanel !== taskId;
+            });
+        }
+
+        rows.forEach(function (row) {
+            row.addEventListener("click", function () {
+                selectTask(row.dataset.approvalTaskRow);
+            });
+            row.addEventListener("keydown", function (event) {
+                if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    selectTask(row.dataset.approvalTaskRow);
+                }
+            });
+        });
+    });
+</script>
 {% endblock %}

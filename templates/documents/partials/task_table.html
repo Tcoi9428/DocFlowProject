@@ -1,3 +1,4 @@
+{% load user_display %}
 <div class="table-wrap">
     <table class="table">
         <thead>
@@ -14,7 +15,7 @@
                 <tr>
                     <td><a href="{% url 'documents:detail' task.document.pk %}">{{ task.document.system_number }}</a><br>{{ task.document.title }}</td>
                     <td>{% if task.step %}{{ task.step.name }}{% else %}-{% endif %}</td>
-                    <td>{{ task.approver.get_full_name|default:task.approver.username }}</td>
+                    <td>{% include "documents/partials/user_display.html" with person=task.approver %}</td>
                     <td class="{% if task.is_overdue %}danger-text{% endif %}">{{ task.due_date|date:"d.m.Y"|default:"-" }}</td>
                     <td>
                         <span class="badge {% if task.is_overdue %}badge-danger{% elif task.status == 'approved' %}badge-success{% elif task.status == 'pending' %}badge-warn{% endif %}">

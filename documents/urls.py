@@ -11,6 +11,7 @@ urlpatterns = [
     path("all/", views.all_documents, name="all_documents"),
     path("archive/", views.archive, name="archive"),
     path("reports/", views.reports, name="reports"),
+    path("notifications/<int:pk>/", views.notification_open, name="notification_open"),
     path("documents/new/", views.document_create, name="create"),
     path("documents/<int:pk>/", views.document_detail, name="detail"),
     path("documents/<int:pk>/edit/", views.document_edit, name="edit"),

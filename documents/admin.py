@@ -15,6 +15,7 @@ from .models import (
     DocumentComment,
     DocumentPurpose,
     DocumentType,
+    Notification,
     UserProfile,
 )
 
@@ -145,6 +146,13 @@ class ApprovalTaskAdmin(admin.ModelAdmin):
 class DocumentCommentAdmin(admin.ModelAdmin):
     list_display = ["document", "author", "created_at"]
     search_fields = ["document__system_number", "text", "author__username"]
+
+
+@admin.register(Notification)
+class NotificationAdmin(admin.ModelAdmin):
+    list_display = ["created_at", "recipient", "notification_type", "title", "is_read"]
+    list_filter = ["notification_type", "is_read", "created_at"]
+    search_fields = ["recipient__username", "title", "message", "document__system_number"]
 
 
 @admin.register(AuditLog)

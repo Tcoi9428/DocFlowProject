@@ -1,6 +1,7 @@
 from django import forms
 from django.contrib.auth.models import User
 
+from .user_display import user_identity
 from .models import (
     ApprovalRoute,
     ApprovalTask,
@@ -12,6 +13,11 @@ from .models import (
     DocumentPurpose,
     DocumentType,
 )
+
+
+class UserModelChoiceField(forms.ModelChoiceField):
+    def label_from_instance(self, obj):
+        return user_identity(obj)
 
 
 class DocumentForm(forms.ModelForm):
@@ -46,6 +52,11 @@ class DocumentForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         self.custom_field_definitions = kwargs.pop("custom_field_definitions", None)
         super().__init__(*args, **kwargs)
+        self.fields["responsible"] = UserModelChoiceField(
+            queryset=User.objects.filter(is_active=True).select_related("userprofile").order_by("last_name", "first_name", "username"),
+            required=False,
+            label=self.fields["responsible"].label,
+        )
         self.fields["contract_kind"].queryset = ContractKind.objects.filter(is_active=True)
         self.fields["document_purpose"].queryset = DocumentPurpose.objects.filter(is_active=True)
         self.fields["route"].queryset = ApprovalRoute.objects.filter(is_active=True)
@@ -58,11 +69,11 @@ class DocumentForm(forms.ModelForm):
             self.fields["route"].queryset = self.fields["route"].queryset.filter(
                 document_type_id=selected_type_id
             )
-        if selected_document_type and selected_document_type.code in {"DOG", "SZ"}:
+        if selected_document_type and selected_document_type.code in {"DOG", "SZ", "PRK"}:
             self.fields["summary"].label = "Примечание"
             self.fields["amount"].required = False
             self.fields.pop("amount", None)
-        if selected_document_type and selected_document_type.code == "SZ":
+        if selected_document_type and selected_document_type.code in {"SZ", "PRK"}:
             self.fields.pop("counterparty", None)
         if not selected_document_type or selected_document_type.code != "DOG":
             self.fields.pop("contract_kind", None)
@@ -139,9 +150,9 @@ class ApprovalActionForm(forms.Form):
 
 
 class ReturnForRevisionForm(forms.Form):
-    responsible = forms.ModelChoiceField(
+    responsible = UserModelChoiceField(
         label="Ответственный за доработку",
-        queryset=User.objects.filter(is_active=True),
+        queryset=User.objects.filter(is_active=True).select_related("userprofile").order_by("last_name", "first_name", "username"),
         required=False,
     )
     comment = forms.CharField(
@@ -151,9 +162,9 @@ class ReturnForRevisionForm(forms.Form):
 
 
 class DelegateForm(forms.Form):
-    delegated_to = forms.ModelChoiceField(
+    delegated_to = UserModelChoiceField(
         label="Новый согласующий",
-        queryset=User.objects.filter(is_active=True),
+        queryset=User.objects.filter(is_active=True).select_related("userprofile").order_by("last_name", "first_name", "username"),
     )
     comment = forms.CharField(
         label="Комментарий",

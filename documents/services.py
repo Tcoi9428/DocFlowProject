@@ -4,7 +4,8 @@ from django.core.mail import send_mail
 from django.db import transaction
 from django.utils import timezone
 
-from .models import ApprovalRoute, ApprovalTask, AuditLog, Document
+from .models import ApprovalRoute, ApprovalTask, AuditLog, Document, Notification
+from .user_display import user_identity
 
 
 def log_action(user, document, action, message, request=None):
@@ -27,6 +28,40 @@ def notify_user(user, subject, message):
         send_mail(subject, message, None, [user.email], fail_silently=True)
 
 
+def create_notification(recipient, document, notification_type, title, message, link_url=""):
+    if not recipient:
+        return None
+    return Notification.objects.create(
+        recipient=recipient,
+        document=document,
+        notification_type=notification_type,
+        title=title,
+        message=message,
+        link_url=link_url or f"/documents/{document.id}/",
+    )
+
+
+def notify_approval_required(user, document):
+    notify_user(
+        user,
+        f"Документ {document.system_number} поступил на согласование",
+        f"Необходимо согласовать документ: {document.title}.",
+    )
+    create_notification(
+        user,
+        document,
+        Notification.APPROVAL_REQUIRED,
+        f"Требуется согласование {document.system_number}",
+        f"Документ '{document.title}' поступил вам на согласование.",
+        f"/documents/{document.id}/",
+    )
+
+
+def notify_status_change(user, document, title, message):
+    notify_user(user, title, message)
+    create_notification(user, document, Notification.STATUS_CHANGED, title, message)
+
+
 @transaction.atomic
 def start_approval(document, user, request=None):
     route = document.route or ApprovalRoute.objects.filter(
@@ -45,24 +80,15 @@ def start_approval(document, user, request=None):
     document.approval_tasks.all().delete()
 
     if configured_approvers:
-        if route and route.route_type == ApprovalRoute.PARALLEL:
-            active_approvers = configured_approvers
-        else:
-            active_approvers = [configured_approvers[0]]
-
+        active_approvers = configured_approvers if route and route.route_type == ApprovalRoute.PARALLEL else [configured_approvers[0]]
         for item in active_approvers:
-            task = ApprovalTask.objects.create(
+            ApprovalTask.objects.create(
                 document=document,
                 configured_approver=item,
                 approver=item.approver,
                 due_date=timezone.localdate() + timedelta(days=item.due_days),
             )
-            notify_user(
-                item.approver,
-                f"Документ {document.system_number} поступил на согласование",
-                f"Необходимо согласовать документ: {document.title}. Срок: {task.due_date}.",
-            )
-
+            notify_approval_required(item.approver, document)
         log_action(user, document, AuditLog.UPDATE, "Документ отправлен на пользовательское согласование.", request)
         return
 
@@ -70,11 +96,7 @@ def start_approval(document, user, request=None):
     if not steps:
         raise ValueError("В маршруте согласования нет этапов.")
 
-    if route.route_type == ApprovalRoute.PARALLEL:
-        active_steps = steps
-    else:
-        active_steps = [steps[0]]
-
+    active_steps = steps if route.route_type == ApprovalRoute.PARALLEL else [steps[0]]
     for step in active_steps:
         task = ApprovalTask.objects.create(
             document=document,
@@ -82,11 +104,7 @@ def start_approval(document, user, request=None):
             approver=step.approver,
             due_date=timezone.localdate() + timedelta(days=step.due_days),
         )
-        notify_user(
-            step.approver,
-            f"Документ {document.system_number} поступил на согласование",
-            f"Необходимо согласовать документ: {document.title}. Срок: {task.due_date}.",
-        )
+        notify_approval_required(step.approver, document)
 
     log_action(user, document, AuditLog.UPDATE, f"Документ отправлен на согласование по маршруту '{route}'.", request)
 
@@ -97,64 +115,66 @@ def approve_task(task, user, comment="", request=None):
     task.comment = comment
     task.completed_at = timezone.now()
     task.save(update_fields=["status", "comment", "completed_at", "updated_at"])
-    log_action(user, task.document, AuditLog.APPROVE, f"Согласовано: {comment}".strip(), request)
-
     document = task.document
     route = document.route
+    approver_name = user_identity(user)
+
+    log_action(user, document, AuditLog.APPROVE, f"Согласовано: {comment}".strip(), request)
+    notify_status_change(
+        document.author,
+        document,
+        f"Документ {document.system_number}: этап согласован",
+        f"Документ согласован пользователем {approver_name}.",
+    )
 
     if task.configured_approver_id:
         if route and route.route_type == ApprovalRoute.PARALLEL:
             if not document.approval_tasks.filter(status=ApprovalTask.PENDING).exists():
-                document.status = Document.APPROVED
-                document.save(update_fields=["status", "updated_at"])
-                notify_user(document.author, f"Документ {document.system_number} согласован", document.title)
+                _finish_document_approval(document)
             return
 
         next_approver = document.configured_approvers.filter(
             order__gt=task.configured_approver.order
         ).order_by("order").first()
         if next_approver:
-            next_task = ApprovalTask.objects.create(
+            ApprovalTask.objects.create(
                 document=document,
                 configured_approver=next_approver,
                 approver=next_approver.approver,
                 due_date=timezone.localdate() + timedelta(days=next_approver.due_days),
             )
-            notify_user(
-                next_approver.approver,
-                f"Документ {document.system_number} поступил на согласование",
-                f"Необходимо согласовать документ: {document.title}. Срок: {next_task.due_date}.",
-            )
+            notify_approval_required(next_approver.approver, document)
         else:
-            document.status = Document.APPROVED
-            document.save(update_fields=["status", "updated_at"])
-            notify_user(document.author, f"Документ {document.system_number} согласован", document.title)
+            _finish_document_approval(document)
         return
 
     if route.route_type == ApprovalRoute.PARALLEL:
         if not document.approval_tasks.filter(status=ApprovalTask.PENDING).exists():
-            document.status = Document.APPROVED
-            document.save(update_fields=["status", "updated_at"])
-            notify_user(document.author, f"Документ {document.system_number} согласован", document.title)
+            _finish_document_approval(document)
         return
 
     next_step = route.steps.filter(order__gt=task.step.order).order_by("order").first()
     if next_step:
-        next_task = ApprovalTask.objects.create(
+        ApprovalTask.objects.create(
             document=document,
             step=next_step,
             approver=next_step.approver,
             due_date=timezone.localdate() + timedelta(days=next_step.due_days),
         )
-        notify_user(
-            next_step.approver,
-            f"Документ {document.system_number} поступил на согласование",
-            f"Необходимо согласовать документ: {document.title}. Срок: {next_task.due_date}.",
-        )
+        notify_approval_required(next_step.approver, document)
     else:
-        document.status = Document.APPROVED
-        document.save(update_fields=["status", "updated_at"])
-        notify_user(document.author, f"Документ {document.system_number} согласован", document.title)
+        _finish_document_approval(document)
+
+
+def _finish_document_approval(document):
+    document.status = Document.APPROVED
+    document.save(update_fields=["status", "updated_at"])
+    notify_status_change(
+        document.author,
+        document,
+        f"Документ {document.system_number} согласован всеми участниками",
+        "Документ согласован всеми участниками маршрута.",
+    )
 
 
 @transaction.atomic
@@ -167,7 +187,12 @@ def reject_task(task, user, comment="", request=None):
     document.status = Document.REJECTED
     document.save(update_fields=["status", "updated_at"])
     log_action(user, document, AuditLog.REJECT, f"Отклонено: {comment}".strip(), request)
-    notify_user(document.author, f"Документ {document.system_number} отклонен", comment or document.title)
+    notify_status_change(
+        document.author,
+        document,
+        f"Документ {document.system_number} отклонен",
+        comment or "Документ отклонен согласующим.",
+    )
 
 
 @transaction.atomic
@@ -181,12 +206,19 @@ def return_for_revision(task, user, responsible=None, comment="", request=None):
     document.responsible = responsible or document.author
     document.save(update_fields=["status", "responsible", "updated_at"])
     log_action(user, document, AuditLog.RETURN, f"Возвращено на доработку: {comment}".strip(), request)
-    notify_user(document.responsible, f"Документ {document.system_number} возвращен на доработку", comment)
+    notify_status_change(
+        document.responsible,
+        document,
+        f"Документ {document.system_number} отправлен на доработку",
+        comment or "Документ возвращен на доработку.",
+    )
 
 
 @transaction.atomic
 def delegate_task(task, user, delegated_to, comment="", request=None):
     old_approver = task.approver
+    old_approver_name = user_identity(old_approver)
+    delegated_to_name = user_identity(delegated_to)
     task.status = ApprovalTask.DELEGATED
     task.delegated_to = delegated_to
     task.comment = comment
@@ -195,6 +227,7 @@ def delegate_task(task, user, delegated_to, comment="", request=None):
     ApprovalTask.objects.create(
         document=task.document,
         step=task.step,
+        configured_approver=task.configured_approver,
         approver=delegated_to,
         due_date=task.due_date,
     )
@@ -202,7 +235,7 @@ def delegate_task(task, user, delegated_to, comment="", request=None):
         user,
         task.document,
         AuditLog.DELEGATE,
-        f"Согласование делегировано от {old_approver} к {delegated_to}. {comment}".strip(),
+        f"Согласование делегировано от {old_approver_name} к {delegated_to_name}. {comment}".strip(),
         request,
     )
-    notify_user(delegated_to, f"Вам делегировано согласование {task.document.system_number}", task.document.title)
+    notify_approval_required(delegated_to, task.document)

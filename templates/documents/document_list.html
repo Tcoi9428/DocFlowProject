@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load user_display %}
 
 {% block title %}{{ title }} | DocFlow{% endblock %}
 
@@ -47,7 +48,7 @@
                     <dt>Номер</dt><dd>{{ document.system_number }}</dd>
                     <dt>Тип</dt><dd>{{ document.document_type.name }}</dd>
                     <dt>Объект</dt><dd>{{ document.counterparty|default:document.department|default:"-" }}</dd>
-                    <dt>Ответственный</dt><dd>{{ document.responsible.get_full_name|default:document.responsible.username|default:"-" }}</dd>
+                    <dt>Ответственный</dt><dd>{% include "documents/partials/user_display.html" with person=document.responsible %}</dd>
                     <dt>Дата создания</dt><dd>{{ document.registration_date|date:"d.m.Y" }}</dd>
                     <dt>Текущий этап</dt><dd>{% if document.approval_tasks.first %}{{ document.approval_tasks.first.step.name }}{% else %}-{% endif %}</dd>
                     <dt>Файлы</dt><dd>{{ document.attachments.count }}</dd>

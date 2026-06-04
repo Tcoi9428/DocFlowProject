@@ -140,6 +140,7 @@ a:hover {
     align-items: center;
     gap: 10px;
     font-weight: 600;
+    position: relative;
 }
 
 .side-nav a:hover,
@@ -169,6 +170,20 @@ a:hover {
     stroke-width: 1.8;
     stroke-linecap: round;
     stroke-linejoin: round;
+}
+
+.menu-badge {
+    margin-left: auto;
+    min-width: 20px;
+    height: 20px;
+    border-radius: 999px;
+    background: #fff;
+    color: var(--accent);
+    display: inline-grid;
+    place-items: center;
+    padding: 0 6px;
+    font-size: 11px;
+    font-weight: 800;
 }
 
 .sidebar-footer {
@@ -245,6 +260,7 @@ a:hover {
     border-radius: 6px;
     font-weight: 800;
     color: #526173;
+    position: relative;
 }
 
 .icon-button svg {
@@ -265,6 +281,93 @@ a:hover {
     color: var(--danger);
     border-color: #ffd1cc;
     background: #fff1f0;
+}
+
+.top-badge {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    min-width: 18px;
+    height: 18px;
+    border: 2px solid #fff;
+    border-radius: 999px;
+    background: var(--danger);
+    color: #fff;
+    display: grid;
+    place-items: center;
+    padding: 0 5px;
+    font-size: 10px;
+    font-weight: 800;
+}
+
+.notification-menu {
+    position: relative;
+}
+
+.notification-panel {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    width: 360px;
+    max-height: 430px;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: 0 14px 36px rgba(16, 26, 36, 0.18);
+    display: none;
+    z-index: 30;
+}
+
+.notification-menu:hover .notification-panel,
+.notification-menu:focus-within .notification-panel {
+    display: block;
+}
+
+.notification-panel-title {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--line);
+    font-weight: 800;
+}
+
+.notification-item {
+    display: block;
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--soft-line);
+    color: var(--text);
+}
+
+.notification-item:hover {
+    background: #fffaf5;
+    text-decoration: none;
+}
+
+.notification-item strong,
+.notification-item span,
+.notification-item small {
+    display: block;
+}
+
+.notification-item span {
+    color: var(--muted);
+    margin-top: 3px;
+    line-height: 1.35;
+}
+
+.notification-item small {
+    color: #8a96a6;
+    margin-top: 5px;
+}
+
+.notification-item.unread {
+    border-left: 3px solid var(--accent);
+    background: #fff8f0;
+}
+
+.notification-empty {
+    padding: 18px 14px;
+    color: var(--muted);
+    text-align: center;
 }
 
 .user-chip {
@@ -295,6 +398,21 @@ a:hover {
 .user-chip small {
     color: var(--muted);
     font-size: 11px;
+}
+
+.user-display {
+    display: inline-flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 2px;
+    line-height: 1.2;
+    vertical-align: top;
+}
+
+.user-display small {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 600;
 }
 
 .page {
@@ -387,7 +505,7 @@ p {
 
 .approval-layout {
     display: grid;
-    grid-template-columns: 420px minmax(0, 1fr);
+    grid-template-columns: 1fr 1fr;
     gap: 14px;
     align-items: start;
 }
@@ -638,6 +756,16 @@ p {
     margin-bottom: 14px;
 }
 
+.approver-list-header {
+    display: grid;
+    grid-template-columns: minmax(120px, 1fr) minmax(150px, 1.15fr) 74px 34px;
+    gap: 8px;
+    margin: 0 16px 6px;
+    color: #526173;
+    font-size: 12px;
+    font-weight: 800;
+}
+
 .approver-row {
     display: grid;
     grid-template-columns: minmax(120px, 1fr) minmax(150px, 1.15fr) 74px 34px;
@@ -714,6 +842,7 @@ button:hover,
 .button:hover {
     background: #f7fafc;
     text-decoration: none;
+    color: #000;
 }
 
 .primary {
@@ -735,7 +864,72 @@ button:hover,
 .success {
     background: var(--success);
     border-color: var(--success);
-    color: #fff;
+    color: #17212f;
+}
+
+.outline {
+    background: transparent;
+    border-color: #aeb9c6;
+    color: var(--text);
+}
+
+.outline:hover {
+    background: #f7fafc;
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.approval-decision-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+    align-items: stretch;
+}
+
+.decision-column {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #f8fafc;
+}
+
+.decision-column label {
+    color: #526173;
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.decision-column select,
+.decision-column textarea {
+    width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 8px 10px;
+    background: #fff;
+    color: var(--text);
+    font: inherit;
+}
+
+.decision-column textarea {
+    min-height: 112px;
+    resize: vertical;
+}
+
+.decision-column select:focus,
+.decision-column textarea:focus {
+    outline: 0;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(238, 134, 44, 0.16);
+}
+
+.decision-button {
+    width: 100%;
+    margin-top: auto;
+    min-height: 38px;
 }
 
 .actions {
@@ -772,6 +966,46 @@ button:hover,
 
 .table tr:hover td {
     background: #fffaf5;
+}
+
+.approval-task-row {
+    cursor: pointer;
+}
+
+.approval-task-row:focus {
+    outline: 0;
+}
+
+.approval-task-row.is-selected td,
+.approval-task-row:focus td {
+    background: #fff4e8;
+    box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.approval-preview-card .toolbar {
+    align-items: flex-start;
+}
+
+.approval-preview-card .toolbar h2 {
+    margin-bottom: 4px;
+}
+
+.approval-preview-card .toolbar p {
+    margin-bottom: 0;
+}
+
+.approval-preview-details {
+    margin-bottom: 14px;
+}
+
+.audit-log-table .is-hidden {
+    display: none;
+}
+
+.audit-log-actions {
+    display: flex;
+    justify-content: center;
+    padding-top: 12px;
 }
 
 .empty {
@@ -1027,6 +1261,7 @@ button:hover,
 @media (max-width: 1180px) {
     .layout-two,
     .approval-layout,
+    .approval-decision-grid,
     .document-create-layout,
     .chart-grid {
         grid-template-columns: 1fr;
@@ -1078,6 +1313,7 @@ button:hover,
     .filter-grid,
     .form-grid,
     .approver-row,
+    .approver-list-header,
     .grid-2.equal {
         grid-template-columns: 1fr;
     }

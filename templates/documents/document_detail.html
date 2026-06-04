@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load user_display %}
 
 {% block title %}{{ document.system_number }} | DocFlow{% endblock %}
 
@@ -30,8 +31,8 @@
             {% endif %}
             <dt>Статус</dt><dd>{{ document.get_status_display }}</dd>
             <dt>Внутренний номер</dt><dd>{{ document.internal_number|default:"-" }}</dd>
-            <dt>Инициатор</dt><dd>{{ document.author.get_full_name|default:document.author.username }}</dd>
-            <dt>Ответственный</dt><dd>{{ document.responsible.get_full_name|default:document.responsible.username|default:"-" }}</dd>
+            <dt>Инициатор</dt><dd>{% include "documents/partials/user_display.html" with person=document.author %}</dd>
+            <dt>Ответственный</dt><dd>{% include "documents/partials/user_display.html" with person=document.responsible %}</dd>
             <dt>Подразделение</dt><dd>{{ document.department|default:"-" }}</dd>
             <dt>Дата регистрации</dt><dd>{{ document.registration_date|date:"d.m.Y" }}</dd>
             <dt>Срок</dt><dd>{{ document.due_date|date:"d.m.Y"|default:"-" }}</dd>
@@ -73,26 +74,28 @@
 {% if user_task %}
 <section class="panel">
     <h2>Ваше решение</h2>
-    <div class="approval-actions">
-        <form method="post" action="{% url 'documents:approval_action' user_task.pk 'approve' %}" class="form">
+    <div class="approval-decision-grid">
+        <form method="post" action="{% url 'documents:approval_action' user_task.pk 'approve' %}" class="decision-column">
             {% csrf_token %}
-            {{ action_form.as_p }}
-            <button class="primary" type="submit">Согласовать</button>
+            <label for="approve-comment-{{ user_task.pk }}">Комментарий</label>
+            <textarea id="approve-comment-{{ user_task.pk }}" name="comment" rows="5" placeholder="Комментарий к согласованию"></textarea>
+            <button class="success decision-button" type="submit">Согласовать</button>
         </form>
-        <form method="post" action="{% url 'documents:approval_action' user_task.pk 'reject' %}" class="form">
+
+        <form method="post" action="{% url 'documents:approval_action' user_task.pk 'return' %}" class="decision-column">
             {% csrf_token %}
-            {{ action_form.as_p }}
-            <button class="danger" type="submit">Отклонить</button>
+            <label for="return-comment-{{ user_task.pk }}">Комментарий</label>
+            <textarea id="return-comment-{{ user_task.pk }}" name="comment" rows="5" required placeholder="Причина отклонения или возврата"></textarea>
+            <button class="danger decision-button" type="submit">Отклонить/вернуть на доработку</button>
         </form>
-        <form method="post" action="{% url 'documents:approval_action' user_task.pk 'return' %}" class="form">
+
+        <form method="post" action="{% url 'documents:approval_action' user_task.pk 'delegate' %}" class="decision-column">
             {% csrf_token %}
-            {{ return_form.as_p }}
-            <button type="submit">Вернуть на доработку</button>
-        </form>
-        <form method="post" action="{% url 'documents:approval_action' user_task.pk 'delegate' %}" class="form">
-            {% csrf_token %}
-            {{ delegate_form.as_p }}
-            <button type="submit">Делегировать</button>
+            <label for="{{ delegate_form.delegated_to.id_for_label }}">Делегировать кому</label>
+            {{ delegate_form.delegated_to }}
+            <label for="delegate-comment-{{ user_task.pk }}">Комментарий</label>
+            <textarea id="delegate-comment-{{ user_task.pk }}" name="comment" rows="5" placeholder="Комментарий для нового согласующего"></textarea>
+            <button class="outline decision-button" type="submit">Делегировать</button>
         </form>
     </div>
 </section>
@@ -108,7 +111,7 @@
         <div class="comments">
             {% for comment in document.comments.all %}
                 <article>
-                    <strong>{{ comment.author.get_full_name|default:comment.author.username }}</strong>
+                    <strong>{% include "documents/partials/user_display.html" with person=comment.author %}</strong>
                     <span>{{ comment.created_at|date:"d.m.Y H:i" }}</span>
                     <p>{{ comment.text|linebreaksbr }}</p>
                 </article>
@@ -126,13 +129,13 @@
 
 <section class="panel">
     <h2>Журнал действий</h2>
-    <table class="table">
+    <table class="table audit-log-table" data-audit-log>
         <thead><tr><th>Дата</th><th>Пользователь</th><th>Действие</th><th>Описание</th></tr></thead>
         <tbody>
             {% for item in document.auditlog_set.all %}
-                <tr>
+                <tr class="{% if forloop.counter > 10 %}audit-log-extra is-hidden{% endif %}">
                     <td>{{ item.created_at|date:"d.m.Y H:i" }}</td>
-                    <td>{{ item.user|default:"Система" }}</td>
+                    <td>{% if item.user %}{% include "documents/partials/user_display.html" with person=item.user %}{% else %}Система{% endif %}</td>
                     <td>{{ item.get_action_display }}</td>
                     <td>{{ item.message }}</td>
                 </tr>
@@ -141,5 +144,28 @@
             {% endfor %}
         </tbody>
     </table>
+    {% if document.auditlog_set.all|length > 10 %}
+        <div class="audit-log-actions">
+            <button type="button" class="button" data-audit-log-more>Показать больше</button>
+        </div>
+    {% endif %}
 </section>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        var button = document.querySelector("[data-audit-log-more]");
+        if (!button) {
+            return;
+        }
+
+        button.addEventListener("click", function () {
+            var isExpanded = button.dataset.expanded === "true";
+            document.querySelectorAll(".audit-log-extra").forEach(function (row) {
+                row.classList.toggle("is-hidden", isExpanded);
+            });
+            button.dataset.expanded = isExpanded ? "false" : "true";
+            button.textContent = isExpanded ? "Показать больше" : "Свернуть";
+        });
+    });
+</script>
 {% endblock %}
