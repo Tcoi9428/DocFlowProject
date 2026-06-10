@@ -7,7 +7,7 @@
 <section class="page-header">
     <div>
         <h1>{{ title }}</h1>
-        <p>Реестр документов с быстрым поиском, фильтрами и карточкой выбранного документа.</p>
+        <p>Реестр документов с карточкой выбранного документа.</p>
     </div>
     <a class="button primary" href="{% url 'documents:create' %}">+ Создать документ</a>
 </section>
@@ -28,7 +28,7 @@
 </form>
 {% endif %}
 
-<section class="layout-two">
+<section class="layout-two" data-document-browser>
     <div class="panel">
         <div class="toolbar">
             <strong>Документы</strong>
@@ -37,29 +37,104 @@
                 <button type="button">Экспорт</button>
             </div>
         </div>
-        {% include "documents/partials/document_table.html" with documents=documents %}
+
+        <div class="table-wrap">
+            <table class="table document-browser-table">
+                <thead>
+                    <tr>
+                        <th>Документ</th>
+                        <th>№ / Код</th>
+                        <th>Тип</th>
+                        <th>Объект</th>
+                        <th>Статус</th>
+                        <th>Инициатор</th>
+                        <th>Дата</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for document in documents %}
+                        <tr class="document-browser-row {% if forloop.first %}is-selected{% endif %}" data-document-row="{{ document.pk }}" tabindex="0">
+                            <td>
+                                <strong>{{ document.title }}</strong>
+                                <small>{{ document.system_number }}</small>
+                            </td>
+                            <td>{{ document.system_number }}</td>
+                            <td>{{ document.document_type.name }}</td>
+                            <td>{{ document.counterparty|default:document.department|default:"-" }}</td>
+                            <td><span class="status status-{{ document.status }}">{{ document.get_status_display }}</span></td>
+                            <td>{% include "documents/partials/user_display.html" with person=document.author %}</td>
+                            <td>{{ document.registration_date|date:"d.m.Y" }}</td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="7" class="empty">Нет данных</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </div>
 
-    <aside class="panel preview-card">
-        <h2>Карточка документа</h2>
-        {% with document=documents.first %}
-            {% if document %}
+    <aside class="panel preview-card document-preview-card">
+        {% for document in documents %}
+            <div class="document-preview-panel" data-document-panel="{{ document.pk }}" {% if not forloop.first %}hidden{% endif %}>
+                <div class="toolbar">
+                    <div>
+                        <h2>{{ document.title }}</h2>
+                        <p class="muted">{{ document.system_number }} · {{ document.document_type.name }}</p>
+                    </div>
+                    <a class="button" href="{% url 'documents:detail' document.pk %}">Открыть карточку</a>
+                </div>
+
                 <dl class="details">
                     <dt>Номер</dt><dd>{{ document.system_number }}</dd>
                     <dt>Тип</dt><dd>{{ document.document_type.name }}</dd>
+                    <dt>Статус</dt><dd><span class="status status-{{ document.status }}">{{ document.get_status_display }}</span></dd>
                     <dt>Объект</dt><dd>{{ document.counterparty|default:document.department|default:"-" }}</dd>
+                    <dt>Инициатор</dt><dd>{% include "documents/partials/user_display.html" with person=document.author %}</dd>
                     <dt>Ответственный</dt><dd>{% include "documents/partials/user_display.html" with person=document.responsible %}</dd>
                     <dt>Дата создания</dt><dd>{{ document.registration_date|date:"d.m.Y" }}</dd>
-                    <dt>Текущий этап</dt><dd>{% if document.approval_tasks.first %}{{ document.approval_tasks.first.step.name }}{% else %}-{% endif %}</dd>
+                    <dt>Срок</dt><dd>{{ document.due_date|date:"d.m.Y"|default:"-" }}</dd>
+                    <dt>Текущий этап</dt>
+                    <dd>{% if document.approval_tasks.first %}{% firstof document.approval_tasks.first.step.name "Этап согласования" %}{% else %}-{% endif %}</dd>
                     <dt>Файлы</dt><dd>{{ document.attachments.count }}</dd>
                 </dl>
-                <div class="actions compact">
-                    <a class="button" href="{% url 'documents:detail' document.pk %}">Открыть карточку</a>
-                </div>
-            {% else %}
-                <p class="empty">Нет документа для предпросмотра</p>
-            {% endif %}
-        {% endwith %}
+
+                {% if document.summary %}
+                    <h3>Примечание</h3>
+                    <p>{{ document.summary|linebreaksbr }}</p>
+                {% endif %}
+            </div>
+        {% empty %}
+            <h2>Нет документов</h2>
+            <p>Документы для предпросмотра появятся после создания или изменения фильтра.</p>
+        {% endfor %}
     </aside>
 </section>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        var rows = document.querySelectorAll("[data-document-row]");
+        var panels = document.querySelectorAll("[data-document-panel]");
+
+        function selectDocument(documentId) {
+            rows.forEach(function (row) {
+                row.classList.toggle("is-selected", row.dataset.documentRow === documentId);
+            });
+            panels.forEach(function (panel) {
+                panel.hidden = panel.dataset.documentPanel !== documentId;
+            });
+        }
+
+        rows.forEach(function (row) {
+            row.addEventListener("click", function () {
+                selectDocument(row.dataset.documentRow);
+            });
+            row.addEventListener("keydown", function (event) {
+                if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    selectDocument(row.dataset.documentRow);
+                }
+            });
+        });
+    });
+</script>
 {% endblock %}

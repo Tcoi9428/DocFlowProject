@@ -1,0 +1,12 @@
+CREATE DATABASE DocflowApplicationDB;
+GO
+
+CREATE LOGIN DocFlowUser WITH PASSWORD = 'CHANGE_ME_STRONG_PASSWORD';
+GO
+
+USE DocflowApplicationDB;
+GO
+
+CREATE USER DocFlowUser FOR LOGIN DocFlowUser;
+ALTER ROLE db_owner ADD MEMBER DocFlowUser;
+GO

@@ -9,11 +9,12 @@ from .models import (
     ContractKind,
     Document,
     DocumentApprover,
+    DocumentComment,
     DocumentPurpose,
     Notification,
     DocumentType,
 )
-from .services import approve_task, start_approval
+from .services import approve_task, return_for_revision, start_approval
 
 
 class DocumentWorkflowTests(TestCase):
@@ -126,6 +127,70 @@ class DocumentWorkflowTests(TestCase):
                 document=document,
                 notification_type=Notification.APPROVAL_REQUIRED,
                 is_read=False,
+            ).exists()
+        )
+
+    def test_return_for_revision_keeps_document_responsible_and_saves_comment(self):
+        document = Document.objects.create(
+            document_type=self.document_type,
+            title="Договор на доработку",
+            author=self.author,
+            responsible=self.director,
+            route=self.route,
+        )
+
+        start_approval(document, self.author)
+        task = ApprovalTask.objects.get(document=document, approver=self.manager)
+        return_for_revision(task, self.manager, comment="Исправить условия оплаты")
+        document.refresh_from_db()
+
+        self.assertEqual(document.status, Document.RETURNED)
+        self.assertEqual(document.responsible, self.director)
+        self.assertEqual(document.revision_requested_by, self.manager)
+        self.assertEqual(document.revision_comment, "Исправить условия оплаты")
+        self.assertTrue(
+            DocumentComment.objects.filter(
+                document=document,
+                author=self.manager,
+                text__icontains="Исправить условия оплаты",
+            ).exists()
+        )
+
+    def test_resubmit_after_revision_increments_version_and_restarts_route(self):
+        document = Document.objects.create(
+            document_type=self.document_type,
+            title="Повторное согласование",
+            author=self.author,
+            responsible=self.director,
+            route=self.route,
+        )
+
+        start_approval(document, self.author)
+        task = ApprovalTask.objects.get(document=document, approver=self.manager)
+        return_for_revision(task, self.manager, comment="Нужна новая версия")
+
+        self.client.force_login(self.director)
+        response = self.client.post(
+            f"/documents/{document.pk}/resubmit/",
+            {"corrections": "Обновлен файл договора и условия оплаты."},
+        )
+        document.refresh_from_db()
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(document.version, 2)
+        self.assertEqual(document.status, Document.ON_APPROVAL)
+        self.assertTrue(
+            ApprovalTask.objects.filter(
+                document=document,
+                approver=self.manager,
+                status=ApprovalTask.PENDING,
+            ).exists()
+        )
+        self.assertTrue(
+            DocumentComment.objects.filter(
+                document=document,
+                author=self.director,
+                text__icontains="Обновлен файл договора",
             ).exists()
         )
 

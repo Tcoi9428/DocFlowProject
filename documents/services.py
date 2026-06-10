@@ -4,7 +4,7 @@ from django.core.mail import send_mail
 from django.db import transaction
 from django.utils import timezone
 
-from .models import ApprovalRoute, ApprovalTask, AuditLog, Document, Notification
+from .models import ApprovalRoute, ApprovalTask, AuditLog, Document, DocumentComment, Notification
 from .user_display import user_identity
 
 
@@ -202,9 +202,31 @@ def return_for_revision(task, user, responsible=None, comment="", request=None):
     task.completed_at = timezone.now()
     task.save(update_fields=["status", "comment", "completed_at", "updated_at"])
     document = task.document
+    document.approval_tasks.filter(status=ApprovalTask.PENDING).exclude(pk=task.pk).update(
+        status=ApprovalTask.RETURNED,
+        completed_at=timezone.now(),
+    )
     document.status = Document.RETURNED
-    document.responsible = responsible or document.author
-    document.save(update_fields=["status", "responsible", "updated_at"])
+    if responsible:
+        document.responsible = responsible
+    elif not document.responsible_id:
+        document.responsible = document.author
+    document.revision_requested_by = user
+    document.revision_requested_at = timezone.now()
+    document.revision_comment = comment
+    document.save(update_fields=[
+        "status",
+        "responsible",
+        "revision_requested_by",
+        "revision_requested_at",
+        "revision_comment",
+        "updated_at",
+    ])
+    DocumentComment.objects.create(
+        document=document,
+        author=user,
+        text=f"Документ возвращен на доработку.\n\nКомментарий: {comment or '-'}",
+    )
     log_action(user, document, AuditLog.RETURN, f"Возвращено на доработку: {comment}".strip(), request)
     notify_status_change(
         document.responsible,

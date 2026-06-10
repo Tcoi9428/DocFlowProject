@@ -219,7 +219,7 @@ class Document(TimeStampedModel):
     STATUSES = [
         (DRAFT, "Черновик"),
         (ON_APPROVAL, "На согласовании"),
-        (RETURNED, "Возвращен на доработку"),
+        (RETURNED, "На доработке"),
         (APPROVED, "Согласован"),
         (REJECTED, "Отклонен"),
         (IN_PROGRESS, "В работе"),
@@ -269,6 +269,17 @@ class Document(TimeStampedModel):
         null=True,
         blank=True,
     )
+    version = models.PositiveIntegerField("Версия", default=1)
+    revision_requested_by = models.ForeignKey(
+        User,
+        verbose_name="Кто вернул на доработку",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="revision_requested_documents",
+    )
+    revision_requested_at = models.DateTimeField("Дата возврата на доработку", null=True, blank=True)
+    revision_comment = models.TextField("Комментарий возврата на доработку", blank=True)
     registration_date = models.DateField("Дата регистрации", default=timezone.localdate)
     due_date = models.DateField("Срок исполнения/согласования", null=True, blank=True)
     amount = models.DecimalField("Сумма", max_digits=14, decimal_places=2, null=True, blank=True)

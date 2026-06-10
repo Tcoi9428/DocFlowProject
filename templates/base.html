@@ -42,12 +42,6 @@
                     <span>На согласовании</span>
                     {% if approval_badge_count %}<span class="menu-badge">{{ approval_badge_count }}</span>{% endif %}
                 </a>
-                <a class="{% if request.resolver_match.url_name == 'all_documents' %}active{% endif %}" href="{% url 'documents:all_documents' %}">
-                    <span class="nav-icon"><svg><use href="#icon-journal"></use></svg></span> Журнал
-                </a>
-                <a class="{% if request.resolver_match.url_name == 'reports' %}active{% endif %}" href="{% url 'documents:reports' %}">
-                    <span class="nav-icon"><svg><use href="#icon-chart"></use></svg></span> Отчеты
-                </a>
                 <a class="{% if request.resolver_match.url_name == 'archive' %}active{% endif %}" href="{% url 'documents:archive' %}">
                     <span class="nav-icon"><svg><use href="#icon-archive"></use></svg></span> Архив
                 </a>

@@ -932,6 +932,19 @@ button:hover,
     min-height: 38px;
 }
 
+.revision-panel {
+    border-color: #f4c28e;
+    background: #fffaf5;
+}
+
+.revision-summary {
+    margin-bottom: 12px;
+}
+
+.revision-form textarea {
+    min-height: 112px;
+}
+
 .actions {
     display: flex;
     gap: 8px;
@@ -972,14 +985,43 @@ button:hover,
     cursor: pointer;
 }
 
+.document-browser-row {
+    cursor: pointer;
+}
+
+.document-browser-row td strong,
+.document-browser-row td small {
+    display: block;
+}
+
+.document-browser-row td small {
+    color: var(--muted);
+    margin-top: 3px;
+    font-size: 11px;
+}
+
 .approval-task-row:focus {
     outline: 0;
 }
 
+.document-browser-row:focus {
+    outline: 0;
+}
+
+.document-browser-row.is-selected{
+    border: 1px solid #ee862c;
+}
+
+.document-preview-panel .button {
+    text-align: center;
+}
+
 .approval-task-row.is-selected td,
-.approval-task-row:focus td {
+.approval-task-row:focus td,
+.document-browser-row.is-selected td,
+.document-browser-row:focus td {
     background: #fff4e8;
-    box-shadow: inset 3px 0 0 var(--accent);
+    /* box-shadow: inset 3px 0 0 var(--accent); */
 }
 
 .approval-preview-card .toolbar {
@@ -996,6 +1038,18 @@ button:hover,
 
 .approval-preview-details {
     margin-bottom: 14px;
+}
+
+.document-preview-card .toolbar {
+    align-items: flex-start;
+}
+
+.document-preview-card .toolbar h2 {
+    margin-bottom: 4px;
+}
+
+.document-preview-card .toolbar p {
+    margin-bottom: 0;
 }
 
 .audit-log-table .is-hidden {
@@ -1231,9 +1285,8 @@ button:hover,
 }
 
 .comments span {
-    color: var(--muted);
+    color: #000;
     font-size: 12px;
-    margin-left: 8px;
 }
 
 .messages {

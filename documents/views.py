@@ -4,8 +4,9 @@ import json
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
-from django.forms import HiddenInput
+from django.http import FileResponse, Http404
 from django.db.models import Count, Q
+from django.forms import HiddenInput
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
@@ -16,6 +17,7 @@ from .forms import (
     DelegateForm,
     DocumentForm,
     DocumentSearchForm,
+    RevisionCorrectionForm,
     ReturnForRevisionForm,
 )
 from .models import (
@@ -26,6 +28,7 @@ from .models import (
     CustomFieldDefinition,
     Document,
     DocumentApprover,
+    DocumentComment,
     DocumentType,
     Notification,
 )
@@ -49,6 +52,10 @@ def visible_documents_for(user):
         "responsible__userprofile",
         "department",
         "route",
+    ).prefetch_related(
+        "attachments",
+        "approval_tasks",
+        "approval_tasks__step",
     )
     if user.is_superuser or user.has_perm("documents.view_all_documents"):
         return queryset
@@ -239,7 +246,17 @@ def document_detail(request, pk):
     )
     comment_form = CommentForm()
     attachment_form = AttachmentForm()
+    revision_form = RevisionCorrectionForm()
     user_task = document.approval_tasks.filter(approver=request.user, status=ApprovalTask.PENDING).first()
+    can_work_on_revision = document.status == Document.RETURNED and (
+        request.user.is_superuser or document.responsible_id == request.user.id
+    )
+    can_edit_document = request.user.is_superuser or (
+        document.status == Document.DRAFT and document.author_id == request.user.id
+    ) or (
+        document.status == Document.RETURNED and document.responsible_id == request.user.id
+    )
+    can_manage_attachments = can_edit_document
     action_form = ApprovalActionForm()
     return_form = ReturnForRevisionForm()
     delegate_form = DelegateForm()
@@ -251,7 +268,11 @@ def document_detail(request, pk):
             "document": document,
             "comment_form": comment_form,
             "attachment_form": attachment_form,
+            "revision_form": revision_form,
             "user_task": user_task,
+            "can_work_on_revision": can_work_on_revision,
+            "can_edit_document": can_edit_document,
+            "can_manage_attachments": can_manage_attachments,
             "action_form": action_form,
             "return_form": return_form,
             "delegate_form": delegate_form,
@@ -294,6 +315,12 @@ def document_edit(request, pk):
     if document.status not in [Document.DRAFT, Document.RETURNED] and not request.user.is_superuser:
         messages.error(request, "Редактировать можно только черновик или документ, возвращенный на доработку.")
         return redirect("documents:detail", pk=document.pk)
+    if document.status == Document.RETURNED and not request.user.is_superuser and document.responsible_id != request.user.id:
+        messages.error(request, "Редактировать документ на доработке может только ответственный пользователь.")
+        return redirect("documents:detail", pk=document.pk)
+    if document.status == Document.DRAFT and not request.user.is_superuser and document.author_id != request.user.id:
+        messages.error(request, "Редактировать черновик может только инициатор документа.")
+        return redirect("documents:detail", pk=document.pk)
     custom_fields = document.document_type.custom_fields.filter(is_active=True)
     if request.method == "POST":
         form = DocumentForm(request.POST, instance=document, custom_field_definitions=custom_fields)
@@ -316,6 +343,9 @@ def document_edit(request, pk):
 def submit_for_approval(request, pk):
     document = get_object_or_404(visible_documents_for(request.user), pk=pk)
     if request.method == "POST":
+        if document.status == Document.RETURNED:
+            messages.error(request, "Для повторной отправки документа на согласование используйте блок доработки.")
+            return redirect("documents:detail", pk=document.pk)
         try:
             start_approval(document, request.user, request)
             messages.success(request, "Документ отправлен на согласование.")
@@ -325,9 +355,52 @@ def submit_for_approval(request, pk):
 
 
 @login_required
+def resubmit_after_revision(request, pk):
+    document = get_object_or_404(visible_documents_for(request.user), pk=pk, status=Document.RETURNED)
+    if not request.user.is_superuser and document.responsible_id != request.user.id:
+        messages.error(request, "Повторно отправить документ может только ответственный пользователь.")
+        return redirect("documents:detail", pk=document.pk)
+
+    if request.method == "POST":
+        form = RevisionCorrectionForm(request.POST)
+        if form.is_valid():
+            corrections = form.cleaned_data["corrections"]
+            document.version += 1
+            document.save(update_fields=["version", "updated_at"])
+            DocumentComment.objects.create(
+                document=document,
+                author=request.user,
+                text=f"Ответственным пользователем внесены правки. Версия документа: {document.version}.\n\nКорректировки: {corrections}",
+            )
+            log_action(
+                request.user,
+                document,
+                AuditLog.UPDATE,
+                f"Внесены корректировки по возврату на доработку. Документ переведен в версию {document.version}.",
+                request,
+            )
+            try:
+                start_approval(document, request.user, request)
+                messages.success(request, "Корректировки сохранены, документ повторно отправлен на согласование.")
+            except ValueError as exc:
+                messages.error(request, str(exc))
+            return redirect("documents:detail", pk=document.pk)
+        messages.error(request, "Укажите внесенные корректировки.")
+    return redirect("documents:detail", pk=document.pk)
+
+
+@login_required
 def upload_attachment(request, pk):
     document = get_object_or_404(visible_documents_for(request.user), pk=pk)
     if request.method == "POST":
+        can_upload = request.user.is_superuser or (
+            document.status == Document.DRAFT and document.author_id == request.user.id
+        ) or (
+            document.status == Document.RETURNED and document.responsible_id == request.user.id
+        )
+        if not can_upload:
+            messages.error(request, "Нет прав на загрузку вложения для этого документа.")
+            return redirect("documents:detail", pk=document.pk)
         form = AttachmentForm(request.POST, request.FILES)
         if form.is_valid():
             uploaded_file = form.cleaned_data["file"]
@@ -346,6 +419,40 @@ def upload_attachment(request, pk):
             messages.success(request, "Файл загружен.")
         else:
             messages.error(request, "Файл не загружен. Проверьте размер и формат.")
+    return redirect("documents:detail", pk=document.pk)
+
+
+@login_required
+def download_attachment(request, pk, attachment_id):
+    document = get_object_or_404(visible_documents_for(request.user), pk=pk)
+    attachment = get_object_or_404(Attachment, pk=attachment_id, document=document)
+    if not attachment.file:
+        raise Http404("Attachment file not found.")
+    try:
+        return FileResponse(attachment.file.open("rb"), as_attachment=True, filename=attachment.original_name)
+    except FileNotFoundError as exc:
+        raise Http404("Attachment file not found.") from exc
+
+
+@login_required
+def delete_attachment(request, pk, attachment_id):
+    document = get_object_or_404(visible_documents_for(request.user), pk=pk)
+    attachment = get_object_or_404(Attachment, pk=attachment_id, document=document)
+    can_delete = request.user.is_superuser or (
+        document.status == Document.DRAFT and document.author_id == request.user.id
+    ) or (
+        document.status == Document.RETURNED and document.responsible_id == request.user.id
+    )
+    if not can_delete:
+        messages.error(request, "Нет прав на удаление вложения.")
+        return redirect("documents:detail", pk=document.pk)
+    if request.method == "POST":
+        original_name = attachment.original_name
+        if attachment.file:
+            attachment.file.delete(save=False)
+        attachment.delete()
+        log_action(request.user, document, AuditLog.DELETE, f"Удалено вложение {original_name}.", request)
+        messages.success(request, "Вложение удалено.")
     return redirect("documents:detail", pk=document.pk)
 
 

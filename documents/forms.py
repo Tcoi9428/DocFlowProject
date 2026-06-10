@@ -180,6 +180,13 @@ class CommentForm(forms.ModelForm):
         widgets = {"text": forms.Textarea(attrs={"rows": 3, "placeholder": "Добавить комментарий"})}
 
 
+class RevisionCorrectionForm(forms.Form):
+    corrections = forms.CharField(
+        label="Внесенные корректировки",
+        widget=forms.Textarea(attrs={"rows": 4, "placeholder": "Опишите, какие правки внесены перед повторным согласованием"}),
+    )
+
+
 class ApprovalTaskFilterForm(forms.Form):
     only_overdue = forms.BooleanField(label="Только просроченные", required=False)
 

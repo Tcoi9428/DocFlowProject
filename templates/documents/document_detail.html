@@ -10,8 +10,10 @@
         <p>{{ document.title }}</p>
     </div>
     <div class="actions">
-        <a class="button" href="{% url 'documents:edit' document.pk %}">Редактировать</a>
-        {% if document.status == "draft" or document.status == "returned" %}
+        {% if can_edit_document %}
+            <a class="button" href="{% url 'documents:edit' document.pk %}">Редактировать</a>
+        {% endif %}
+        {% if document.status == "draft" %}
             <form method="post" action="{% url 'documents:submit' document.pk %}">
                 {% csrf_token %}
                 <button class="primary" type="submit">Отправить на согласование</button>
@@ -30,6 +32,7 @@
                 <dt>Назначение документа</dt><dd>{{ document.document_purpose|default:"-" }}</dd>
             {% endif %}
             <dt>Статус</dt><dd>{{ document.get_status_display }}</dd>
+            <dt>Версия</dt><dd>Версия {{ document.version }}</dd>
             <dt>Внутренний номер</dt><dd>{{ document.internal_number|default:"-" }}</dd>
             <dt>Инициатор</dt><dd>{% include "documents/partials/user_display.html" with person=document.author %}</dd>
             <dt>Ответственный</dt><dd>{% include "documents/partials/user_display.html" with person=document.responsible %}</dd>
@@ -56,20 +59,61 @@
         <ul class="file-list">
             {% for attachment in document.attachments.all %}
                 <li>
-                    <a href="{{ attachment.file.url }}">{{ attachment.original_name }}</a>
-                    <span>{{ attachment.size|filesizeformat }}</span>
+                    <span>
+                        <a href="{% url 'documents:download_attachment' document.pk attachment.pk %}">{{ attachment.original_name }}</a>
+                        <small>{{ attachment.size|filesizeformat }}</small>
+                    </span>
+                    {% if can_manage_attachments %}
+                        <form method="post" action="{% url 'documents:delete_attachment' document.pk attachment.pk %}">
+                            {% csrf_token %}
+                            <button class="danger" type="submit">Удалить объект</button>
+                        </form>
+                    {% endif %}
                 </li>
             {% empty %}
                 <li class="empty">Файлы не загружены</li>
             {% endfor %}
         </ul>
-        <form method="post" enctype="multipart/form-data" action="{% url 'documents:upload_attachment' document.pk %}" class="form compact">
-            {% csrf_token %}
-            {{ attachment_form.as_p }}
-            <button type="submit">Загрузить файл</button>
-        </form>
+        {% if can_manage_attachments %}
+            <form method="post" enctype="multipart/form-data" action="{% url 'documents:upload_attachment' document.pk %}" class="form compact">
+                {% csrf_token %}
+                {{ attachment_form.as_p }}
+                <button type="submit">{% if can_work_on_revision %}Загрузить заменяющий файл{% else %}Загрузить файл{% endif %}</button>
+            </form>
+        {% endif %}
     </div>
 </section>
+
+{% if can_work_on_revision %}
+<section class="panel revision-panel">
+    <h2>Документ на доработке</h2>
+    <div class="revision-summary">
+        <dl class="details">
+            <dt>Версия</dt><dd>Текущая версия: {{ document.version }}</dd>
+            <dt>Вернул</dt><dd>{% include "documents/partials/user_display.html" with person=document.revision_requested_by %}</dd>
+            <dt>Дата возврата</dt><dd>{{ document.revision_requested_at|date:"d.m.Y H:i"|default:"-" }}</dd>
+            <dt>Комментарий</dt><dd>{{ document.revision_comment|linebreaksbr|default:"-" }}</dd>
+        </dl>
+    </div>
+    <form method="post" action="{% url 'documents:resubmit_after_revision' document.pk %}" class="form revision-form">
+        {% csrf_token %}
+        {{ revision_form.as_p }}
+        <div class="actions">
+            <button class="primary" type="submit">Корректировки внесены, отправить на согласование</button>
+        </div>
+    </form>
+</section>
+{% elif document.status == "returned" %}
+<section class="panel revision-panel">
+    <h2>Документ на доработке</h2>
+    <dl class="details">
+        <dt>Ответственный</dt><dd>{% include "documents/partials/user_display.html" with person=document.responsible %}</dd>
+        <dt>Вернул</dt><dd>{% include "documents/partials/user_display.html" with person=document.revision_requested_by %}</dd>
+        <dt>Дата возврата</dt><dd>{{ document.revision_requested_at|date:"d.m.Y H:i"|default:"-" }}</dd>
+        <dt>Комментарий</dt><dd>{{ document.revision_comment|linebreaksbr|default:"-" }}</dd>
+    </dl>
+</section>
+{% endif %}
 
 {% if user_task %}
 <section class="panel">
