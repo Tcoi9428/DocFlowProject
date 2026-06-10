@@ -6,7 +6,8 @@ param(
     [string]$SecretKey,
 
     [string]$MediaRoot = "S:\DocFlow\data\media",
-    [string]$StaticRoot = "S:\DocFlow\data\staticfiles"
+    [string]$StaticRoot = "S:\DocFlow\data\staticfiles",
+    [string]$DbDriver = "ODBC Driver 18 for SQL Server"
 )
 
 $env:DOCFLOW_DEBUG = "false"
@@ -20,7 +21,7 @@ $env:DOCFLOW_DB_USER = "DocFlowUser"
 $env:DOCFLOW_DB_PASSWORD = $DbPassword
 $env:DOCFLOW_DB_HOST = "10.110.53.17"
 $env:DOCFLOW_DB_PORT = "1433"
-$env:DOCFLOW_DB_DRIVER = "ODBC Driver 18 for SQL Server"
+$env:DOCFLOW_DB_DRIVER = $DbDriver
 $env:DOCFLOW_DB_EXTRA_PARAMS = "TrustServerCertificate=yes"
 
 $env:DOCFLOW_MEDIA_ROOT = $MediaRoot

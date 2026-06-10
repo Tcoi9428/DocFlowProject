@@ -20,12 +20,18 @@
 
 1. Python x64.
 2. Git.
-3. Microsoft ODBC Driver 18 for SQL Server.
+3. Microsoft ODBC Driver 18 for SQL Server или другой установленный ODBC-драйвер SQL Server.
 4. Python-зависимости проекта:
 
 ```powershell
 python -m pip install --upgrade pip
 pip install -r requirements.txt
+```
+
+Проверить установленные ODBC-драйверы:
+
+```powershell
+Get-OdbcDriver | Where-Object { $_.Name -like "*SQL*" } | Select-Object Name
 ```
 
 ## Создание базы
@@ -40,6 +46,18 @@ pip install -r requirements.txt
 .\deployment\run-localcorp-waitress.ps1 `
   -DbPassword "ПАРОЛЬ_SQL_ПОЛЬЗОВАТЕЛЯ" `
   -SecretKey "ДЛИННАЯ_СЛУЧАЙНАЯ_СТРОКА" `
+  -DbDriver "ODBC Driver 18 for SQL Server" `
+  -MediaRoot "S:\Договоры и соглашения\DocFlow\data\media" `
+  -StaticRoot "S:\Договоры и соглашения\DocFlow\data\staticfiles"
+```
+
+Если на сервере установлен не `ODBC Driver 18 for SQL Server`, а например `ODBC Driver 17 for SQL Server`, укажите его:
+
+```powershell
+.\deployment\run-localcorp-waitress.ps1 `
+  -DbPassword "ПАРОЛЬ_SQL_ПОЛЬЗОВАТЕЛЯ" `
+  -SecretKey "ДЛИННАЯ_СЛУЧАЙНАЯ_СТРОКА" `
+  -DbDriver "ODBC Driver 17 for SQL Server" `
   -MediaRoot "S:\Договоры и соглашения\DocFlow\data\media" `
   -StaticRoot "S:\Договоры и соглашения\DocFlow\data\staticfiles"
 ```
