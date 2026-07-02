@@ -32,14 +32,14 @@ D:\DocFlow\logs             журналы сервиса
 CREATE DATABASE DocFlow;
 GO
 
-CREATE LOGIN docflow_user WITH PASSWORD = 'CHANGE_ME_STRONG_PASSWORD';
+CREATE LOGIN FlowUser WITH PASSWORD = 'CHANGE_ME_STRONG_PASSWORD';
 GO
 
 USE DocFlow;
 GO
 
-CREATE USER docflow_user FOR LOGIN docflow_user;
-ALTER ROLE db_owner ADD MEMBER docflow_user;
+CREATE USER FlowUser FOR LOGIN FlowUser;
+ALTER ROLE db_owner ADD MEMBER FlowUser;
 GO
 ```
 
@@ -83,7 +83,7 @@ $env:DOCFLOW_CSRF_TRUSTED_ORIGINS="http://SERVER_NAME_OR_IP"
 
 $env:DOCFLOW_DB_ENGINE="mssql"
 $env:DOCFLOW_DB_NAME="DocFlow"
-$env:DOCFLOW_DB_USER="docflow_user"
+$env:DOCFLOW_DB_USER="FlowUser"
 $env:DOCFLOW_DB_PASSWORD="CHANGE_ME"
 $env:DOCFLOW_DB_HOST="SQL_SERVER_HOST_OR_IP"
 $env:DOCFLOW_DB_PORT="1433"

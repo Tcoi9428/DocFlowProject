@@ -17,7 +17,7 @@ $env:DOCFLOW_CSRF_TRUSTED_ORIGINS = "http://10.110.53.17:8010"
 
 $env:DOCFLOW_DB_ENGINE = "mssql"
 $env:DOCFLOW_DB_NAME = "DocflowApplicationDB"
-$env:DOCFLOW_DB_USER = "DocFlowUser"
+$env:DOCFLOW_DB_USER = "FlowUser"
 $env:DOCFLOW_DB_PASSWORD = $DbPassword
 $env:DOCFLOW_DB_HOST = "10.110.53.17"
 $env:DOCFLOW_DB_PORT = "1433"
