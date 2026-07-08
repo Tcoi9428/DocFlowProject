@@ -96,7 +96,11 @@ else:
     }
 
 
-AUTH_PASSWORD_VALIDATORS = []
+AUTH_PASSWORD_VALIDATORS = [
+    {
+        "NAME": "documents.password_validation.LatinLettersAndDigitsPasswordValidator",
+    },
+]
 
 LANGUAGE_CODE = "ru-ru"
 TIME_ZONE = "Asia/Yekaterinburg"

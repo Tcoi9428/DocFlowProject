@@ -20,5 +20,8 @@
         {{ form.as_p }}
         <button class="primary" type="submit">Войти</button>
     </form>
+    <div class="auth-links">
+        <a href="{% url 'documents:password_reset_request' %}">Забыли пароль?</a>
+    </div>
 </section>
 {% endblock %}

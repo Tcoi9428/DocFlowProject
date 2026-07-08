@@ -16,6 +16,7 @@ from .models import (
     DocumentPurpose,
     DocumentType,
     Notification,
+    PasswordResetRequest,
     UserProfile,
 )
 
@@ -153,6 +154,14 @@ class NotificationAdmin(admin.ModelAdmin):
     list_display = ["created_at", "recipient", "notification_type", "title", "is_read"]
     list_filter = ["notification_type", "is_read", "created_at"]
     search_fields = ["recipient__username", "title", "message", "document__system_number"]
+
+
+@admin.register(PasswordResetRequest)
+class PasswordResetRequestAdmin(admin.ModelAdmin):
+    list_display = ["created_at", "user", "code", "status", "expires_at", "used_at"]
+    list_filter = ["status", "created_at", "expires_at"]
+    search_fields = ["user__username", "user__first_name", "user__last_name", "code"]
+    readonly_fields = ["user", "code", "status", "expires_at", "used_at", "created_at", "updated_at"]
 
 
 @admin.register(AuditLog)

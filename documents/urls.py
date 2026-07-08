@@ -6,6 +6,9 @@ app_name = "documents"
 
 urlpatterns = [
     path("", views.dashboard, name="dashboard"),
+    path("password-reset/", views.password_reset_request, name="password_reset_request"),
+    path("password-reset/confirm/", views.password_reset_confirm, name="password_reset_confirm"),
+    path("password-reset/admin/<int:pk>/", views.password_reset_admin_detail, name="password_reset_admin_detail"),
     path("my/", views.my_documents, name="my_documents"),
     path("inbox/", views.approval_inbox, name="approval_inbox"),
     path("all/", views.all_documents, name="all_documents"),

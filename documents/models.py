@@ -1,4 +1,5 @@
 from pathlib import Path
+import secrets
 from uuid import uuid4
 
 from django.conf import settings
@@ -458,10 +459,12 @@ class Notification(TimeStampedModel):
     APPROVAL_REQUIRED = "approval_required"
     STATUS_CHANGED = "status_changed"
     COMMENT_ADDED = "comment_added"
+    PASSWORD_RESET = "password_reset"
     TYPES = [
         (APPROVAL_REQUIRED, "Требуется согласование"),
         (STATUS_CHANGED, "Изменение статуса"),
         (COMMENT_ADDED, "Добавлен комментарий"),
+        (PASSWORD_RESET, "Сброс пароля"),
     ]
 
     recipient = models.ForeignKey(
@@ -492,6 +495,54 @@ class Notification(TimeStampedModel):
 
     def __str__(self):
         return f"{self.recipient}: {self.title}"
+
+
+class PasswordResetRequest(TimeStampedModel):
+    PENDING = "pending"
+    USED = "used"
+    EXPIRED = "expired"
+    STATUSES = [
+        (PENDING, "Ожидает подтверждения"),
+        (USED, "Использован"),
+        (EXPIRED, "Истек"),
+    ]
+
+    user = models.ForeignKey(
+        User,
+        verbose_name="Пользователь",
+        on_delete=models.CASCADE,
+        related_name="password_reset_requests",
+    )
+    code = models.CharField("Код подтверждения", max_length=4)
+    status = models.CharField("Статус", max_length=20, choices=STATUSES, default=PENDING)
+    expires_at = models.DateTimeField("Действует до")
+    used_at = models.DateTimeField("Использован", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Запрос сброса пароля"
+        verbose_name_plural = "Запросы сброса пароля"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.user} - {self.code} ({self.get_status_display()})"
+
+    @classmethod
+    def create_for_user(cls, user):
+        cls.objects.filter(user=user, status=cls.PENDING).update(status=cls.EXPIRED)
+        return cls.objects.create(
+            user=user,
+            code=f"{secrets.randbelow(10000):04d}",
+            expires_at=timezone.now() + timezone.timedelta(minutes=30),
+        )
+
+    @property
+    def is_active(self):
+        return self.status == self.PENDING and self.expires_at >= timezone.now()
+
+    def mark_used(self):
+        self.status = self.USED
+        self.used_at = timezone.now()
+        self.save(update_fields=["status", "used_at", "updated_at"])
 
 
 class AuditLog(TimeStampedModel):

@@ -13,6 +13,7 @@ from .models import (
     DocumentPurpose,
     Notification,
     DocumentType,
+    PasswordResetRequest,
 )
 from .services import approve_task, return_for_revision, start_approval
 
@@ -193,5 +194,58 @@ class DocumentWorkflowTests(TestCase):
                 text__icontains="Обновлен файл договора",
             ).exists()
         )
+
+    def test_password_reset_request_notifies_admin_with_code(self):
+        admin = User.objects.create_user(username="admin2", password="admin2", is_staff=True)
+        response = self.client.post("/password-reset/", {"username": self.author.username})
+        reset_request = PasswordResetRequest.objects.get(user=self.author)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(len(reset_request.code), 4)
+        self.assertTrue(reset_request.code.isdigit())
+        self.assertTrue(
+            Notification.objects.filter(
+                recipient=admin,
+                notification_type=Notification.PASSWORD_RESET,
+                message__icontains=reset_request.code,
+                link_url=f"/password-reset/admin/{reset_request.pk}/",
+            ).exists()
+        )
+
+    def test_password_reset_confirm_changes_password_with_admin_code(self):
+        reset_request = PasswordResetRequest.create_for_user(self.author)
+
+        response = self.client.post(
+            "/password-reset/confirm/",
+            {
+                "username": self.author.username,
+                "code": reset_request.code,
+                "new_password1": "pass1",
+                "new_password2": "pass1",
+            },
+        )
+        self.author.refresh_from_db()
+        reset_request.refresh_from_db()
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(self.author.check_password("pass1"))
+        self.assertEqual(reset_request.status, PasswordResetRequest.USED)
+
+    def test_password_reset_confirm_rejects_password_without_digits(self):
+        reset_request = PasswordResetRequest.create_for_user(self.author)
+
+        response = self.client.post(
+            "/password-reset/confirm/",
+            {
+                "username": self.author.username,
+                "code": reset_request.code,
+                "new_password1": "pass",
+                "new_password2": "pass",
+            },
+        )
+        self.author.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(self.author.check_password("pass"))
 
 # Create your tests here.

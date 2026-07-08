@@ -487,6 +487,49 @@ p {
     color: var(--muted);
 }
 
+.auth-hint {
+    margin: 0 0 14px;
+    font-size: 13px;
+}
+
+.auth-links {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 12px;
+    font-size: 13px;
+}
+
+.auth-links a {
+    color: var(--accent);
+    font-weight: 700;
+}
+
+.form .helptext {
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.form .errorlist {
+    margin: 0;
+    padding-left: 18px;
+    color: var(--danger);
+    font-size: 12px;
+}
+
+.reset-code {
+    display: inline-block;
+    min-width: 78px;
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: #f8fafc;
+    font-size: 20px;
+    letter-spacing: 3px;
+    text-align: center;
+}
+
 .narrow {
     max-width: 1057px;
 }

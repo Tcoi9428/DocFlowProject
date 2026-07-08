@@ -1,5 +1,7 @@
 from django import forms
 from django.contrib.auth.models import User
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 
 from .user_display import user_identity
 from .models import (
@@ -12,6 +14,7 @@ from .models import (
     DocumentComment,
     DocumentPurpose,
     DocumentType,
+    PasswordResetRequest,
 )
 
 
@@ -194,3 +197,74 @@ class ApprovalTaskFilterForm(forms.Form):
 class DocumentSearchForm(forms.Form):
     query = forms.CharField(label="Поиск", required=False)
     status = forms.ChoiceField(label="Статус", choices=[("", "Все статусы")] + Document.STATUSES, required=False)
+
+
+class PasswordResetRequestForm(forms.Form):
+    username = forms.CharField(
+        label="Логин",
+        max_length=150,
+        widget=forms.TextInput(attrs={"autocomplete": "username"}),
+    )
+
+    def clean_username(self):
+        username = self.cleaned_data["username"].strip()
+        self.user = User.objects.filter(username__iexact=username, is_active=True).first()
+        return username
+
+
+class PasswordResetConfirmForm(forms.Form):
+    username = forms.CharField(
+        label="Логин",
+        max_length=150,
+        widget=forms.TextInput(attrs={"autocomplete": "username"}),
+    )
+    code = forms.CharField(
+        label="4-значный код",
+        min_length=4,
+        max_length=4,
+        widget=forms.TextInput(attrs={"inputmode": "numeric", "autocomplete": "one-time-code"}),
+    )
+    new_password1 = forms.CharField(
+        label="Новый пароль",
+        help_text="Минимум 4 символа. Только латинские буквы и цифры. Нужна хотя бы одна буква и одна цифра.",
+        widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
+    )
+    new_password2 = forms.CharField(
+        label="Повторите пароль",
+        widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
+    )
+
+    def clean_code(self):
+        code = self.cleaned_data["code"].strip()
+        if not code.isdigit():
+            raise ValidationError("Код должен состоять из 4 цифр.")
+        return code
+
+    def clean(self):
+        cleaned_data = super().clean()
+        username = cleaned_data.get("username", "").strip()
+        code = cleaned_data.get("code")
+        password1 = cleaned_data.get("new_password1")
+        password2 = cleaned_data.get("new_password2")
+        user = User.objects.filter(username__iexact=username, is_active=True).first()
+        if username and not user:
+            self.add_error("username", "Активный пользователь с таким логином не найден.")
+        if password1 and password2 and password1 != password2:
+            self.add_error("new_password2", "Пароли не совпадают.")
+        if user and code:
+            reset_request = (
+                PasswordResetRequest.objects.filter(user=user, code=code, status=PasswordResetRequest.PENDING)
+                .order_by("-created_at")
+                .first()
+            )
+            if not reset_request or not reset_request.is_active:
+                self.add_error("code", "Код неверен или срок его действия истек.")
+            else:
+                self.reset_request = reset_request
+        if user and password1:
+            try:
+                validate_password(password1, user)
+            except ValidationError as exc:
+                self.add_error("new_password1", exc)
+        self.user = user
+        return cleaned_data

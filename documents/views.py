@@ -3,11 +3,13 @@ import json
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.decorators import user_passes_test
 from django.contrib.auth.models import User
 from django.http import FileResponse, Http404
 from django.db.models import Count, Q
 from django.forms import HiddenInput
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 
 from .forms import (
@@ -17,6 +19,8 @@ from .forms import (
     DelegateForm,
     DocumentForm,
     DocumentSearchForm,
+    PasswordResetConfirmForm,
+    PasswordResetRequestForm,
     RevisionCorrectionForm,
     ReturnForRevisionForm,
 )
@@ -31,6 +35,7 @@ from .models import (
     DocumentComment,
     DocumentType,
     Notification,
+    PasswordResetRequest,
 )
 from .services import (
     approve_task,
@@ -41,6 +46,28 @@ from .services import (
     start_approval,
     create_notification,
 )
+
+
+def is_admin_user(user):
+    return user.is_active and (user.is_staff or user.is_superuser)
+
+
+def notify_admins_about_password_reset(reset_request, request):
+    admins = User.objects.filter(is_active=True).filter(Q(is_staff=True) | Q(is_superuser=True)).distinct()
+    link_url = reverse("documents:password_reset_admin_detail", args=[reset_request.pk])
+    title = f"Запрос сброса пароля: {reset_request.user.username}"
+    message = (
+        f"Пользователь {reset_request.user.get_full_name() or reset_request.user.username} запросил смену пароля. "
+        f"Код подтверждения: {reset_request.code}. Код действует до {reset_request.expires_at:%d.%m.%Y %H:%M}."
+    )
+    for admin_user in admins:
+        Notification.objects.create(
+            recipient=admin_user,
+            notification_type=Notification.PASSWORD_RESET,
+            title=title,
+            message=message,
+            link_url=link_url,
+        )
 
 
 def visible_documents_for(user):
@@ -64,6 +91,45 @@ def visible_documents_for(user):
         | Q(responsible=user)
         | Q(approval_tasks__approver=user)
     ).distinct()
+
+
+def password_reset_request(request):
+    if request.user.is_authenticated:
+        return redirect("documents:my_documents")
+    form = PasswordResetRequestForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        if form.user:
+            reset_request = PasswordResetRequest.create_for_user(form.user)
+            notify_admins_about_password_reset(reset_request, request)
+        messages.success(
+            request,
+            "Если пользователь найден, администратор получит уведомление с 4-значным кодом подтверждения.",
+        )
+        return redirect("documents:password_reset_confirm")
+    return render(request, "registration/password_reset_request.html", {"form": form})
+
+
+def password_reset_confirm(request):
+    if request.user.is_authenticated:
+        return redirect("documents:my_documents")
+    form = PasswordResetConfirmForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        form.user.set_password(form.cleaned_data["new_password1"])
+        form.user.save(update_fields=["password"])
+        form.reset_request.mark_used()
+        messages.success(request, "Пароль изменен. Теперь можно войти в систему.")
+        return redirect("login")
+    return render(request, "registration/password_reset_confirm.html", {"form": form})
+
+
+@login_required
+@user_passes_test(is_admin_user)
+def password_reset_admin_detail(request, pk):
+    reset_request = get_object_or_404(
+        PasswordResetRequest.objects.select_related("user", "user__userprofile"),
+        pk=pk,
+    )
+    return render(request, "documents/password_reset_admin_detail.html", {"reset_request": reset_request})
 
 
 def save_configured_approvers(document, request):
