@@ -7,5 +7,7 @@ from .models import UserProfile
 
 @receiver(post_save, sender=User)
 def create_user_profile(sender, instance, created, **kwargs):
+    if kwargs.get("raw"):
+        return
     if created:
         UserProfile.objects.get_or_create(user=instance)
