@@ -8,10 +8,36 @@ param(
     [string]$MediaRoot = "S:\DocFlow\data\media",
     [string]$StaticRoot = "S:\DocFlow\data\staticfiles",
     [string]$DbDriver = "ODBC Driver 18 for SQL Server",
+    [string]$PythonExe = "",
     [int]$Port = 8010
 )
 
 $ErrorActionPreference = "Stop"
+
+$appRoot = Split-Path -Parent $PSScriptRoot
+$installationRoot = Split-Path -Parent $appRoot
+
+if ([string]::IsNullOrWhiteSpace($PythonExe)) {
+    $pythonCandidates = @(
+        (Join-Path $installationRoot "venv\Scripts\python.exe"),
+        (Join-Path $appRoot ".venv\Scripts\python.exe"),
+        (Join-Path $appRoot "venv\Scripts\python.exe")
+    )
+
+    $PythonExe = $pythonCandidates |
+        Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+        Select-Object -First 1
+
+    if ([string]::IsNullOrWhiteSpace($PythonExe)) {
+        $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+        if ($null -eq $pythonCommand) {
+            throw "Python was not found. Expected '$installationRoot\venv\Scripts\python.exe' or pass -PythonExe explicitly."
+        }
+        $PythonExe = $pythonCommand.Source
+    }
+}
+
+Write-Host "Using Python: $PythonExe" -ForegroundColor Cyan
 
 function Invoke-Checked {
     param(
@@ -45,8 +71,8 @@ if ($installedDrivers -notcontains $DbDriver) {
 New-Item -ItemType Directory -Force -Path $env:DOCFLOW_MEDIA_ROOT | Out-Null
 New-Item -ItemType Directory -Force -Path $env:DOCFLOW_STATIC_ROOT | Out-Null
 
-Invoke-Checked python manage.py check
-Invoke-Checked python manage.py migrate
-Invoke-Checked python manage.py collectstatic --noinput
+Invoke-Checked $PythonExe manage.py check
+Invoke-Checked $PythonExe manage.py migrate
+Invoke-Checked $PythonExe manage.py collectstatic --noinput
 
-Invoke-Checked python -m waitress --listen="0.0.0.0:$Port" docflow_project.wsgi:application
+Invoke-Checked $PythonExe -m waitress --listen="0.0.0.0:$Port" docflow_project.wsgi:application
