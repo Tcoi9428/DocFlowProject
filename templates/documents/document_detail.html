@@ -173,21 +173,23 @@
 
 <section class="panel">
     <h2>Журнал действий</h2>
-    <table class="table audit-log-table" data-audit-log>
+    <div class="table-wrap">
+    <table class="table responsive-table audit-log-table" data-audit-log>
         <thead><tr><th>Дата</th><th>Пользователь</th><th>Действие</th><th>Описание</th></tr></thead>
         <tbody>
             {% for item in document.auditlog_set.all %}
                 <tr class="{% if forloop.counter > 10 %}audit-log-extra is-hidden{% endif %}">
-                    <td>{{ item.created_at|date:"d.m.Y H:i" }}</td>
-                    <td>{% if item.user %}{% include "documents/partials/user_display.html" with person=item.user %}{% else %}Система{% endif %}</td>
-                    <td>{{ item.get_action_display }}</td>
-                    <td>{{ item.message }}</td>
+                    <td data-label="Дата">{{ item.created_at|date:"d.m.Y H:i" }}</td>
+                    <td data-label="Пользователь">{% if item.user %}{% include "documents/partials/user_display.html" with person=item.user %}{% else %}Система{% endif %}</td>
+                    <td data-label="Действие">{{ item.get_action_display }}</td>
+                    <td data-label="Описание">{{ item.message }}</td>
                 </tr>
             {% empty %}
                 <tr><td colspan="4" class="empty">Нет записей</td></tr>
             {% endfor %}
         </tbody>
     </table>
+    </div>
     {% if document.auditlog_set.all|length > 10 %}
         <div class="audit-log-actions">
             <button type="button" class="button" data-audit-log-more>Показать больше</button>

@@ -23,10 +23,10 @@
     <div class="panel">
         <h2>Распределение по типам</h2>
         <div class="donut"><span>{{ total_documents }}<br>док.</span></div>
-        <table class="table">
+        <table class="table responsive-table">
             <tbody>
                 {% for row in period_created %}
-                    <tr><td>{{ row.document_type__name }}</td><td>{{ row.total }}</td></tr>
+                    <tr><td data-label="Тип документа">{{ row.document_type__name }}</td><td data-label="Количество">{{ row.total }}</td></tr>
                 {% empty %}
                     <tr><td class="empty">Нет данных</td><td></td></tr>
                 {% endfor %}

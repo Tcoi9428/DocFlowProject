@@ -5,7 +5,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}DocFlow{% endblock %}</title>
-    <link rel="stylesheet" href="{% static 'css/app.css' %}">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260720-2">
+    <script src="{% static 'js/app.js' %}?v=20260720-2" defer></script>
 </head>
 <body class="{% if user.is_authenticated %}is-authenticated{% else %}is-anonymous{% endif %}">
 <svg class="icon-sprite" aria-hidden="true">
@@ -19,10 +20,15 @@
     <symbol id="icon-message" viewBox="0 0 24 24"><path d="M4 5h16v12H7l-3 3z"/><path d="M8 9h8"/><path d="M8 13h5"/></symbol>
     <symbol id="icon-logout" viewBox="0 0 24 24"><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/><path d="M21 3v18h-8"/></symbol>
     <symbol id="icon-search" viewBox="0 0 24 24"><path d="M11 19a8 8 0 1 1 0-16 8 8 0 0 1 0 16z"/><path d="M21 21l-4.3-4.3"/></symbol>
+    <symbol id="icon-menu" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h16"/></symbol>
+    <symbol id="icon-close" viewBox="0 0 24 24"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></symbol>
 </svg>
 {% if user.is_authenticated %}
     <div class="app-shell">
-        <aside class="sidebar">
+        <aside class="sidebar" id="app-sidebar" data-sidebar>
+            <button class="icon-button mobile-sidebar-close" type="button" data-sidebar-close aria-label="Закрыть меню">
+                <svg><use href="#icon-close"></use></svg>
+            </button>
             <a class="company" href="{% url 'documents:dashboard' %}">
                 <span class="company-logo">
                     <img src="{% static 'img/company-logo.png' %}" alt="Сервис-Инжиниринг">
@@ -57,9 +63,13 @@
                 <span>Свернуть меню</span>
             </div>
         </aside>
+        <button class="sidebar-backdrop" type="button" data-sidebar-backdrop aria-label="Закрыть меню"></button>
 
         <div class="workspace">
             <header class="command-bar">
+                <button class="icon-button mobile-menu-toggle" type="button" data-sidebar-open aria-controls="app-sidebar" aria-expanded="false" aria-label="Открыть меню">
+                    <svg><use href="#icon-menu"></use></svg>
+                </button>
                 <form class="global-search" method="get" action="{% url 'documents:all_documents' %}">
                     <input name="query" type="search" placeholder="Поиск документов, задач, контрагентов...">
                     <button type="submit" aria-label="Найти"><svg class="top-icon"><use href="#icon-search"></use></svg></button>
@@ -83,10 +93,10 @@
                             {% endfor %}
                         </div>
                     </div>
-                    <button class="icon-button" type="button" aria-label="Сообщения"><svg><use href="#icon-message"></use></svg></button>
+                    <button class="icon-button command-message-button" type="button" aria-label="Сообщения"><svg><use href="#icon-message"></use></svg></button>
                     <div class="user-chip">
                         <span class="avatar">{{ user|user_name|first|upper }}</span>
-                        <span>
+                        <span class="user-chip-details">
                             <strong>{{ user|user_name }}</strong>
                             {% with position=user|user_job %}<small>{% if position %}({{ position }}){% else %}-{% endif %}</small>{% endwith %}
                         </span>

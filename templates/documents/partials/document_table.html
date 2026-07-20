@@ -1,6 +1,6 @@
 {% load user_display %}
 <div class="table-wrap">
-    <table class="table">
+    <table class="table responsive-table">
         <thead>
             <tr>
                 <th>Документ</th>
@@ -15,13 +15,13 @@
         <tbody>
             {% for document in documents %}
                 <tr>
-                    <td><a href="{% url 'documents:detail' document.pk %}">{{ document.title }}</a></td>
-                    <td>{{ document.system_number }}</td>
-                    <td>{{ document.document_type.name }}</td>
-                    <td>{{ document.counterparty|default:document.department|default:"-" }}</td>
-                    <td><span class="status status-{{ document.status }}">{{ document.get_status_display }}</span></td>
-                    <td>{% include "documents/partials/user_display.html" with person=document.author %}</td>
-                    <td>{{ document.registration_date|date:"d.m.Y" }}</td>
+                    <td data-label="Документ"><a href="{% url 'documents:detail' document.pk %}">{{ document.title }}</a></td>
+                    <td data-label="№ / Код">{{ document.system_number }}</td>
+                    <td data-label="Тип">{{ document.document_type.name }}</td>
+                    <td data-label="Объект">{{ document.counterparty|default:document.department|default:"-" }}</td>
+                    <td data-label="Статус"><span class="status status-{{ document.status }}">{{ document.get_status_display }}</span></td>
+                    <td data-label="Инициатор">{% include "documents/partials/user_display.html" with person=document.author %}</td>
+                    <td data-label="Дата">{{ document.registration_date|date:"d.m.Y" }}</td>
                 </tr>
             {% empty %}
                 <tr><td colspan="7" class="empty">Нет данных</td></tr>

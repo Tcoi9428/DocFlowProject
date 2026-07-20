@@ -1,6 +1,6 @@
 {% load user_display %}
 <div class="table-wrap">
-    <table class="table">
+    <table class="table responsive-table">
         <thead>
             <tr>
                 <th>Документ</th>
@@ -13,11 +13,11 @@
         <tbody>
             {% for task in tasks %}
                 <tr>
-                    <td><a href="{% url 'documents:detail' task.document.pk %}">{{ task.document.system_number }}</a><br>{{ task.document.title }}</td>
-                    <td>{% if task.step %}{{ task.step.name }}{% else %}-{% endif %}</td>
-                    <td>{% include "documents/partials/user_display.html" with person=task.approver %}</td>
-                    <td class="{% if task.is_overdue %}danger-text{% endif %}">{{ task.due_date|date:"d.m.Y"|default:"-" }}</td>
-                    <td>
+                    <td data-label="Документ"><a href="{% url 'documents:detail' task.document.pk %}">{{ task.document.system_number }}</a><br>{{ task.document.title }}</td>
+                    <td data-label="Текущий этап">{% if task.step %}{{ task.step.name }}{% else %}-{% endif %}</td>
+                    <td data-label="Ответственный">{% include "documents/partials/user_display.html" with person=task.approver %}</td>
+                    <td data-label="Срок" class="{% if task.is_overdue %}danger-text{% endif %}">{{ task.due_date|date:"d.m.Y"|default:"-" }}</td>
+                    <td data-label="Статус">
                         <span class="badge {% if task.is_overdue %}badge-danger{% elif task.status == 'approved' %}badge-success{% elif task.status == 'pending' %}badge-warn{% endif %}">
                             {% if task.is_overdue %}Просрочено{% else %}{{ task.get_status_display }}{% endif %}
                         </span>

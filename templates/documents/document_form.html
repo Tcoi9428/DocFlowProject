@@ -85,14 +85,14 @@
             <div id="approver-list" class="approver-list">
                 {% for item in configured_approvers %}
                     <div class="approver-row">
-                        <input type="text" name="approver_name" value="{{ item.name }}" placeholder="Название этапа">
-                        <select name="approver_user">
-                            <option value="">---------</option>
-                            {% for user_item in users %}
-                                <option value="{{ user_item.id }}" {% if user_item.id == item.approver_id %}selected{% endif %}>{{ user_item|user_label }}</option>
-                            {% endfor %}
-                        </select>
-                        <input type="number" name="approver_due_days" value="{{ item.due_days }}" min="1" max="60" aria-label="Срок согласования, дней">
+                        <label class="approver-field"><span class="mobile-field-label">Название этапа</span><input type="text" name="approver_name" value="{{ item.name }}" placeholder="Название этапа"></label>
+                        <label class="approver-field"><span class="mobile-field-label">Согласующий</span><select name="approver_user">
+                                <option value="">---------</option>
+                                {% for user_item in users %}
+                                    <option value="{{ user_item.id }}" {% if user_item.id == item.approver_id %}selected{% endif %}>{{ user_item|user_label }}</option>
+                                {% endfor %}
+                            </select></label>
+                        <label class="approver-field"><span class="mobile-field-label">Срок, дней</span><input type="number" name="approver_due_days" value="{{ item.due_days }}" min="1" max="60" aria-label="Срок согласования, дней"></label>
                         <button type="button" class="remove-approver-button" aria-label="Удалить">×</button>
                     </div>
                 {% endfor %}
@@ -100,14 +100,14 @@
 
             <template id="approver-row-template">
                 <div class="approver-row">
-                    <input type="text" name="approver_name" value="" placeholder="Название этапа">
-                    <select name="approver_user">
-                        <option value="">---------</option>
-                        {% for user_item in users %}
-                            <option value="{{ user_item.id }}">{{ user_item|user_label }}</option>
-                        {% endfor %}
-                    </select>
-                    <input type="number" name="approver_due_days" value="3" min="1" max="60" aria-label="Срок согласования, дней">
+                    <label class="approver-field"><span class="mobile-field-label">Название этапа</span><input type="text" name="approver_name" value="" placeholder="Название этапа"></label>
+                    <label class="approver-field"><span class="mobile-field-label">Согласующий</span><select name="approver_user">
+                            <option value="">---------</option>
+                            {% for user_item in users %}
+                                <option value="{{ user_item.id }}">{{ user_item|user_label }}</option>
+                            {% endfor %}
+                        </select></label>
+                    <label class="approver-field"><span class="mobile-field-label">Срок, дней</span><input type="number" name="approver_due_days" value="3" min="1" max="60" aria-label="Срок согласования, дней"></label>
                     <button type="button" class="remove-approver-button" aria-label="Удалить">×</button>
                 </div>
             </template>
