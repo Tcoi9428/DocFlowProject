@@ -417,6 +417,8 @@ class ApprovalTask(TimeStampedModel):
     approver = models.ForeignKey(User, verbose_name="Согласующий", on_delete=models.PROTECT, related_name="approval_tasks")
     status = models.CharField("Статус", max_length=20, choices=STATUSES, default=PENDING)
     due_date = models.DateField("Срок", null=True, blank=True)
+    reminder_sent_at = models.DateTimeField("Напоминание отправлено", null=True, blank=True)
+    reminder_due_date = models.DateField("Срок в напоминании", null=True, blank=True)
     comment = models.TextField("Комментарий", blank=True)
     completed_at = models.DateTimeField("Дата выполнения", null=True, blank=True)
     delegated_to = models.ForeignKey(
@@ -457,11 +459,13 @@ class DocumentComment(TimeStampedModel):
 
 class Notification(TimeStampedModel):
     APPROVAL_REQUIRED = "approval_required"
+    APPROVAL_REMINDER = "approval_reminder"
     STATUS_CHANGED = "status_changed"
     COMMENT_ADDED = "comment_added"
     PASSWORD_RESET = "password_reset"
     TYPES = [
         (APPROVAL_REQUIRED, "Требуется согласование"),
+        (APPROVAL_REMINDER, "Напоминание о согласовании"),
         (STATUS_CHANGED, "Изменение статуса"),
         (COMMENT_ADDED, "Добавлен комментарий"),
         (PASSWORD_RESET, "Сброс пароля"),

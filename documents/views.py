@@ -48,6 +48,10 @@ from .services import (
 )
 
 
+def custom_404(request, exception):
+    return render(request, "404.html", status=404)
+
+
 def is_admin_user(user):
     return user.is_active and (user.is_staff or user.is_superuser)
 

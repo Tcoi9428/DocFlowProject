@@ -1,6 +1,9 @@
+from datetime import timedelta
+
 from django.contrib.auth.models import User
 from django.core import mail
 from django.test import TestCase, override_settings
+from django.utils import timezone
 
 from .forms import DocumentForm
 from .models import (
@@ -17,7 +20,13 @@ from .models import (
     DocumentType,
     PasswordResetRequest,
 )
-from .services import approve_task, deliver_email, return_for_revision, start_approval
+from .services import (
+    approve_task,
+    deliver_email,
+    process_approval_reminders,
+    return_for_revision,
+    start_approval,
+)
 
 
 class DocumentWorkflowTests(TestCase):
@@ -180,6 +189,89 @@ class DocumentWorkflowTests(TestCase):
         self.assertEqual(len(mail.outbox), 1)
         self.assertIn(f"/documents/{document.pk}/", mail.outbox[0].body)
 
+    @override_settings(
+        DOCFLOW_EMAIL_SEND_IMMEDIATELY=False,
+        DOCFLOW_BASE_URL="http://10.110.53.17:8010",
+    )
+    def test_approval_reminder_is_created_once_for_current_due_date(self):
+        self.manager.email = "manager@example.com"
+        self.manager.save(update_fields=["email"])
+        document = Document.objects.create(
+            document_type=self.document_type,
+            title="Документ с близким сроком",
+            author=self.author,
+            route=self.route,
+        )
+        start_approval(document, self.author)
+        task = ApprovalTask.objects.get(document=document, approver=self.manager)
+        task.due_date = timezone.localdate() + timedelta(days=1)
+        task.save(update_fields=["due_date", "updated_at"])
+
+        first_count = process_approval_reminders()
+        second_count = process_approval_reminders()
+
+        task.refresh_from_db()
+        reminder = Notification.objects.get(
+            recipient=self.manager,
+            document=document,
+            notification_type=Notification.APPROVAL_REMINDER,
+        )
+        self.assertEqual(first_count, 1)
+        self.assertEqual(second_count, 0)
+        self.assertEqual(task.reminder_due_date, task.due_date)
+        self.assertTrue(hasattr(reminder, "email_delivery"))
+        self.assertIn(f"/documents/{document.pk}/", reminder.email_delivery.link_url)
+
+    @override_settings(DOCFLOW_EMAIL_SEND_IMMEDIATELY=False)
+    def test_responsible_is_notified_when_all_approvers_finish(self):
+        responsible = User.objects.create_user(
+            username="responsible",
+            password="test",
+            email="responsible@example.com",
+        )
+        document = Document.objects.create(
+            document_type=self.document_type,
+            title="Документ для ответственного",
+            author=self.author,
+            responsible=responsible,
+            route=self.route,
+        )
+        start_approval(document, self.author)
+        approve_task(ApprovalTask.objects.get(document=document, approver=self.manager), self.manager)
+        approve_task(ApprovalTask.objects.get(document=document, approver=self.director), self.director)
+
+        notification = Notification.objects.get(
+            recipient=responsible,
+            document=document,
+            title__icontains="согласован всеми участниками",
+        )
+        self.assertTrue(hasattr(notification, "email_delivery"))
+
+    @override_settings(DOCFLOW_EMAIL_SEND_IMMEDIATELY=False)
+    def test_responsible_receives_revision_email_with_actor_and_link(self):
+        self.director.email = "director@example.com"
+        self.director.save(update_fields=["email"])
+        document = Document.objects.create(
+            document_type=self.document_type,
+            title="Документ на доработку",
+            author=self.author,
+            responsible=self.director,
+            route=self.route,
+        )
+        start_approval(document, self.author)
+        task = ApprovalTask.objects.get(document=document, approver=self.manager)
+
+        return_for_revision(task, self.manager, comment="Уточнить условия")
+
+        notification = Notification.objects.get(
+            recipient=self.director,
+            document=document,
+            title__icontains="отправлен на доработку",
+        )
+        self.assertIn("Уточнить условия", notification.message)
+        self.assertTrue(hasattr(notification, "email_delivery"))
+        self.assertIn(f"/documents/{document.pk}/", notification.email_delivery.link_url)
+
     def test_return_for_revision_keeps_document_responsible_and_saves_comment(self):
         document = Document.objects.create(
             document_type=self.document_type,
@@ -296,5 +388,20 @@ class DocumentWorkflowTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(self.author.check_password("pass"))
+
+    @override_settings(DOCFLOW_MAINTENANCE_MODE=True)
+    def test_maintenance_mode_returns_503(self):
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.headers["Retry-After"], "300")
+        self.assertContains(response, "Технические работы", status_code=503)
+
+    @override_settings(DEBUG=False, DOCFLOW_MAINTENANCE_MODE=False)
+    def test_unknown_page_uses_custom_404(self):
+        response = self.client.get("/definitely-missing-page/")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertContains(response, "Страница не найдена", status_code=404)
 
 # Create your tests here.

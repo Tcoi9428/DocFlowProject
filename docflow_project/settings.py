@@ -47,6 +47,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "documents.middleware.MaintenanceModeMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -135,6 +136,8 @@ DEFAULT_FROM_EMAIL = os.getenv("DOCFLOW_DEFAULT_FROM_EMAIL", "DocFlow <docflow-n
 DOCFLOW_BASE_URL = os.getenv("DOCFLOW_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 DOCFLOW_EMAIL_SEND_IMMEDIATELY = env_bool("DOCFLOW_EMAIL_SEND_IMMEDIATELY", False)
 DOCFLOW_EMAIL_MAX_ATTEMPTS = int(os.getenv("DOCFLOW_EMAIL_MAX_ATTEMPTS", "5"))
+DOCFLOW_MAINTENANCE_MODE = env_bool("DOCFLOW_MAINTENANCE_MODE", False)
+DOCFLOW_MAINTENANCE_RETRY_AFTER = int(os.getenv("DOCFLOW_MAINTENANCE_RETRY_AFTER", "300"))
 
 if not DEBUG:
     SESSION_COOKIE_SECURE = env_bool("DOCFLOW_SESSION_COOKIE_SECURE", False)

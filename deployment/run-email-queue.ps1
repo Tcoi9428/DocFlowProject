@@ -54,6 +54,11 @@ if ([string]::IsNullOrWhiteSpace($PythonExe)) {
     -EmailSecurity $EmailSecurity `
     -DefaultFromEmail $DefaultFromEmail
 
+& $PythonExe manage.py send_approval_reminders
+if ($LASTEXITCODE -ne 0) {
+    throw "Approval reminder command failed with exit code $LASTEXITCODE."
+}
+
 & $PythonExe manage.py send_notification_emails --limit $Limit
 if ($LASTEXITCODE -ne 0) {
     throw "Email queue command failed with exit code $LASTEXITCODE."

@@ -132,7 +132,15 @@ class DocumentApproverAdmin(admin.ModelAdmin):
 
 @admin.register(ApprovalTask)
 class ApprovalTaskAdmin(admin.ModelAdmin):
-    list_display = ["document", "approver", "status", "due_date", "completed_at", "overdue_badge"]
+    list_display = [
+        "document",
+        "approver",
+        "status",
+        "due_date",
+        "reminder_sent_at",
+        "completed_at",
+        "overdue_badge",
+    ]
     list_filter = ["status", "due_date"]
     search_fields = ["document__system_number", "document__title", "approver__username"]
 

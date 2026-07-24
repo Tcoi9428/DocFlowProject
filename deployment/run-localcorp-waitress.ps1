@@ -18,7 +18,9 @@ param(
     [string]$EmailPassword = "",
     [ValidateSet("ssl", "tls", "none")]
     [string]$EmailSecurity = "ssl",
-    [string]$DefaultFromEmail = "DocFlow <docflow-notify@yandex.ru>"
+    [string]$DefaultFromEmail = "DocFlow <docflow-notify@yandex.ru>",
+    [ValidateSet("true", "false")]
+    [string]$MaintenanceMode = "false"
 )
 
 $ErrorActionPreference = "Stop"
@@ -83,7 +85,8 @@ if ($installedDrivers -notcontains $DbDriver) {
     -EmailUser $EmailUser `
     -EmailPassword $EmailPassword `
     -EmailSecurity $EmailSecurity `
-    -DefaultFromEmail $DefaultFromEmail
+    -DefaultFromEmail $DefaultFromEmail `
+    -MaintenanceMode $MaintenanceMode
 
 New-Item -ItemType Directory -Force -Path $env:DOCFLOW_MEDIA_ROOT | Out-Null
 New-Item -ItemType Directory -Force -Path $env:DOCFLOW_STATIC_ROOT | Out-Null

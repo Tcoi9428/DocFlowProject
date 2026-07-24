@@ -16,7 +16,9 @@ param(
     [string]$EmailPassword = "",
     [ValidateSet("ssl", "tls", "none")]
     [string]$EmailSecurity = "ssl",
-    [string]$DefaultFromEmail = "DocFlow <docflow-notify@yandex.ru>"
+    [string]$DefaultFromEmail = "DocFlow <docflow-notify@yandex.ru>",
+    [ValidateSet("true", "false")]
+    [string]$MaintenanceMode = "false"
 )
 
 $env:DOCFLOW_DEBUG = "false"
@@ -55,3 +57,5 @@ if ([string]::IsNullOrWhiteSpace($EmailUser) -or [string]::IsNullOrWhiteSpace($E
 
 $env:DOCFLOW_EMAIL_USE_SSL = ($EmailSecurity -eq "ssl").ToString().ToLowerInvariant()
 $env:DOCFLOW_EMAIL_USE_TLS = ($EmailSecurity -eq "tls").ToString().ToLowerInvariant()
+$env:DOCFLOW_MAINTENANCE_MODE = $MaintenanceMode
+$env:DOCFLOW_MAINTENANCE_RETRY_AFTER = "300"

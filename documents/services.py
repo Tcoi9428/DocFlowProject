@@ -5,7 +5,7 @@ from html import escape
 from django.conf import settings
 from django.core.mail import send_mail
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import F, Q
 from django.utils.html import linebreaks
 from django.utils import timezone
 
@@ -144,6 +144,41 @@ def process_email_queue(limit=50):
         else:
             failed += 1
     return sent, failed
+
+
+def notify_approval_deadline(task):
+    due_date_text = task.due_date.strftime("%d.%m.%Y")
+    create_notification(
+        task.approver,
+        task.document,
+        Notification.APPROVAL_REMINDER,
+        f"Истекает срок согласования {task.document.system_number}",
+        f"Документ необходимо согласовать не позднее {due_date_text}.",
+        f"/documents/{task.document_id}/",
+        email_subject=f"Напоминание: документ {task.document.system_number} ожидает согласования",
+        email_message=(
+            f"Необходимо согласовать документ {task.document.system_number} "
+            f"не позднее {due_date_text}."
+        ),
+    )
+    task.reminder_sent_at = timezone.now()
+    task.reminder_due_date = task.due_date
+    task.save(update_fields=["reminder_sent_at", "reminder_due_date", "updated_at"])
+
+
+def process_approval_reminders():
+    deadline = timezone.localdate() + timedelta(days=1)
+    tasks = ApprovalTask.objects.select_related("document", "approver").filter(
+        status=ApprovalTask.PENDING,
+        due_date__isnull=False,
+        due_date__lte=deadline,
+    ).filter(Q(reminder_due_date__isnull=True) | ~Q(reminder_due_date=F("due_date")))
+
+    count = 0
+    for task in tasks:
+        notify_approval_deadline(task)
+        count += 1
+    return count
 
 
 def create_notification(
@@ -294,12 +329,16 @@ def approve_task(task, user, comment="", request=None):
 def _finish_document_approval(document):
     document.status = Document.APPROVED
     document.save(update_fields=["status", "updated_at"])
-    notify_status_change(
-        document.author,
-        document,
-        f"Документ {document.system_number} согласован всеми участниками",
-        "Документ согласован всеми участниками маршрута.",
-    )
+    recipients = [document.author]
+    if document.responsible_id and document.responsible_id != document.author_id:
+        recipients.append(document.responsible)
+    for recipient in recipients:
+        notify_status_change(
+            recipient,
+            document,
+            f"Документ {document.system_number} согласован всеми участниками",
+            "Документ согласован всеми участниками маршрута.",
+        )
 
 
 @transaction.atomic
@@ -357,7 +396,12 @@ def return_for_revision(task, user, responsible=None, comment="", request=None):
         document.responsible,
         document,
         f"Документ {document.system_number} отправлен на доработку",
-        comment or "Документ возвращен на доработку.",
+        (
+            f"Документ отправлен на доработку пользователем {user_identity(user)}. "
+            f"Комментарий: {comment}"
+            if comment
+            else f"Документ отправлен на доработку пользователем {user_identity(user)}."
+        ),
     )
 
 
