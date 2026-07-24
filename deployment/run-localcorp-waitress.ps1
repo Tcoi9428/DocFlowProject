@@ -9,13 +9,23 @@ param(
     [string]$StaticRoot = "S:\DocFlow\data\staticfiles",
     [string]$DbDriver = "ODBC Driver 18 for SQL Server",
     [string]$PythonExe = "",
-    [int]$Port = 8010
+    [int]$Port = 8010,
+
+    [string]$BaseUrl = "http://10.110.53.17:8010",
+    [string]$EmailHost = "smtp.yandex.ru",
+    [int]$EmailPort = 465,
+    [string]$EmailUser = "",
+    [string]$EmailPassword = "",
+    [ValidateSet("ssl", "tls", "none")]
+    [string]$EmailSecurity = "ssl",
+    [string]$DefaultFromEmail = "DocFlow <docflow-notify@yandex.ru>"
 )
 
 $ErrorActionPreference = "Stop"
 
 $appRoot = Split-Path -Parent $PSScriptRoot
 $installationRoot = Split-Path -Parent $appRoot
+Set-Location -LiteralPath $appRoot
 
 if ([string]::IsNullOrWhiteSpace($PythonExe)) {
     $pythonCandidates = @(
@@ -66,7 +76,14 @@ if ($installedDrivers -notcontains $DbDriver) {
     -SecretKey $SecretKey `
     -MediaRoot $MediaRoot `
     -StaticRoot $StaticRoot `
-    -DbDriver $DbDriver
+    -DbDriver $DbDriver `
+    -BaseUrl $BaseUrl `
+    -EmailHost $EmailHost `
+    -EmailPort $EmailPort `
+    -EmailUser $EmailUser `
+    -EmailPassword $EmailPassword `
+    -EmailSecurity $EmailSecurity `
+    -DefaultFromEmail $DefaultFromEmail
 
 New-Item -ItemType Directory -Force -Path $env:DOCFLOW_MEDIA_ROOT | Out-Null
 New-Item -ItemType Directory -Force -Path $env:DOCFLOW_STATIC_ROOT | Out-Null

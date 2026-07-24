@@ -497,6 +497,41 @@ class Notification(TimeStampedModel):
         return f"{self.recipient}: {self.title}"
 
 
+class EmailDelivery(TimeStampedModel):
+    PENDING = "pending"
+    SENT = "sent"
+    FAILED = "failed"
+    STATUSES = [
+        (PENDING, "Ожидает отправки"),
+        (SENT, "Отправлено"),
+        (FAILED, "Ошибка"),
+    ]
+
+    notification = models.OneToOneField(
+        Notification,
+        verbose_name="Уведомление",
+        on_delete=models.CASCADE,
+        related_name="email_delivery",
+    )
+    recipient_email = models.EmailField("Email получателя")
+    subject = models.CharField("Тема письма", max_length=255)
+    message = models.TextField("Текст письма")
+    link_url = models.CharField("Ссылка", max_length=500, blank=True)
+    status = models.CharField("Статус", max_length=20, choices=STATUSES, default=PENDING)
+    attempts = models.PositiveSmallIntegerField("Попыток отправки", default=0)
+    last_error = models.TextField("Последняя ошибка", blank=True)
+    next_attempt_at = models.DateTimeField("Следующая попытка", null=True, blank=True)
+    sent_at = models.DateTimeField("Отправлено", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Отправка email"
+        verbose_name_plural = "Отправки email"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.recipient_email}: {self.subject}"
+
+
 class PasswordResetRequest(TimeStampedModel):
     PENDING = "pending"
     USED = "used"

@@ -1,5 +1,6 @@
 from django.contrib.auth.models import User
-from django.test import TestCase
+from django.core import mail
+from django.test import TestCase, override_settings
 
 from .forms import DocumentForm
 from .models import (
@@ -11,11 +12,12 @@ from .models import (
     DocumentApprover,
     DocumentComment,
     DocumentPurpose,
+    EmailDelivery,
     Notification,
     DocumentType,
     PasswordResetRequest,
 )
-from .services import approve_task, return_for_revision, start_approval
+from .services import approve_task, deliver_email, return_for_revision, start_approval
 
 
 class DocumentWorkflowTests(TestCase):
@@ -130,6 +132,53 @@ class DocumentWorkflowTests(TestCase):
                 is_read=False,
             ).exists()
         )
+
+    @override_settings(
+        DOCFLOW_EMAIL_SEND_IMMEDIATELY=False,
+        DOCFLOW_BASE_URL="http://10.110.53.17:8010",
+    )
+    def test_approval_notification_queues_email_with_document_link(self):
+        self.manager.email = "manager@example.com"
+        self.manager.save(update_fields=["email"])
+        document = Document.objects.create(
+            document_type=self.document_type,
+            title="Договор с email-уведомлением",
+            author=self.author,
+            route=self.route,
+        )
+
+        start_approval(document, self.author)
+
+        delivery = EmailDelivery.objects.get(notification__document=document)
+        self.assertEqual(delivery.recipient_email, "manager@example.com")
+        self.assertEqual(delivery.status, EmailDelivery.PENDING)
+        self.assertEqual(delivery.link_url, f"http://10.110.53.17:8010/documents/{document.pk}/")
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DOCFLOW_EMAIL_SEND_IMMEDIATELY=False,
+        DOCFLOW_BASE_URL="http://10.110.53.17:8010",
+    )
+    def test_email_delivery_is_sent_and_marked_as_sent(self):
+        self.manager.email = "manager@example.com"
+        self.manager.save(update_fields=["email"])
+        document = Document.objects.create(
+            document_type=self.document_type,
+            title="Проверка отправки email",
+            author=self.author,
+            route=self.route,
+        )
+        start_approval(document, self.author)
+        delivery = EmailDelivery.objects.get(notification__document=document)
+
+        result = deliver_email(delivery.pk)
+
+        delivery.refresh_from_db()
+        self.assertTrue(result)
+        self.assertEqual(delivery.status, EmailDelivery.SENT)
+        self.assertEqual(delivery.attempts, 1)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn(f"/documents/{document.pk}/", mail.outbox[0].body)
 
     def test_return_for_revision_keeps_document_responsible_and_saves_comment(self):
         document = Document.objects.create(

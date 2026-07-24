@@ -123,7 +123,18 @@ LOGIN_REDIRECT_URL = "documents:my_documents"
 LOGOUT_REDIRECT_URL = "login"
 
 EMAIL_BACKEND = os.getenv("DOCFLOW_EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
-DEFAULT_FROM_EMAIL = os.getenv("DOCFLOW_DEFAULT_FROM_EMAIL", "docflow@company.local")
+EMAIL_HOST = os.getenv("DOCFLOW_EMAIL_HOST", "smtp.yandex.ru")
+EMAIL_PORT = int(os.getenv("DOCFLOW_EMAIL_PORT", "465"))
+EMAIL_HOST_USER = os.getenv("DOCFLOW_EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("DOCFLOW_EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_SSL = env_bool("DOCFLOW_EMAIL_USE_SSL", True)
+EMAIL_USE_TLS = env_bool("DOCFLOW_EMAIL_USE_TLS", False)
+EMAIL_TIMEOUT = int(os.getenv("DOCFLOW_EMAIL_TIMEOUT", "15"))
+DEFAULT_FROM_EMAIL = os.getenv("DOCFLOW_DEFAULT_FROM_EMAIL", "DocFlow <docflow-notify@yandex.ru>")
+
+DOCFLOW_BASE_URL = os.getenv("DOCFLOW_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
+DOCFLOW_EMAIL_SEND_IMMEDIATELY = env_bool("DOCFLOW_EMAIL_SEND_IMMEDIATELY", False)
+DOCFLOW_EMAIL_MAX_ATTEMPTS = int(os.getenv("DOCFLOW_EMAIL_MAX_ATTEMPTS", "5"))
 
 if not DEBUG:
     SESSION_COOKIE_SECURE = env_bool("DOCFLOW_SESSION_COOKIE_SECURE", False)

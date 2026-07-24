@@ -68,6 +68,80 @@ Get-OdbcDriver | Where-Object { $_.Name -like "*SQL*" } | Select-Object Name
 http://10.110.53.17:8010/
 ```
 
+## Email-уведомления через Яндекс
+
+Для временной отправки используется отдельный ящик `docflow-notify@yandex.ru` и пароль приложения Яндекс.
+Основной пароль от почтового ящика использовать нельзя.
+
+Проверить доступность SMTP с Windows Server:
+
+```powershell
+Test-NetConnection smtp.yandex.ru -Port 465
+```
+
+Запуск приложения с включенной отправкой писем:
+
+```powershell
+.\deployment\run-localcorp-waitress.ps1 `
+  -DbPassword "ПАРОЛЬ_SQL_ПОЛЬЗОВАТЕЛЯ" `
+  -SecretKey "ДЛИННАЯ_СЛУЧАЙНАЯ_СТРОКА" `
+  -DbDriver "ODBC Driver 18 for SQL Server" `
+  -MediaRoot "E:\DocFlow\data\media" `
+  -StaticRoot "E:\DocFlow\data\staticfiles" `
+  -BaseUrl "http://10.110.53.17:8010" `
+  -EmailHost "smtp.yandex.ru" `
+  -EmailPort 465 `
+  -EmailUser "docflow-notify@yandex.ru" `
+  -EmailPassword "ПАРОЛЬ_ПРИЛОЖЕНИЯ_ЯНДЕКС" `
+  -EmailSecurity "ssl" `
+  -DefaultFromEmail "DocFlow <docflow-notify@yandex.ru>"
+```
+
+Если `EmailUser` или `EmailPassword` не переданы, приложение безопасно продолжит работу без реальной
+отправки писем, а уведомления останутся в очереди.
+
+Для отдельной проверки SMTP сначала загрузить параметры в текущую PowerShell-сессию:
+
+```powershell
+. .\deployment\set-localcorp-env.ps1 `
+  -DbPassword "ПАРОЛЬ_SQL_ПОЛЬЗОВАТЕЛЯ" `
+  -SecretKey "ДЛИННАЯ_СЛУЧАЙНАЯ_СТРОКА" `
+  -DbDriver "ODBC Driver 18 for SQL Server" `
+  -MediaRoot "E:\DocFlow\data\media" `
+  -StaticRoot "E:\DocFlow\data\staticfiles" `
+  -BaseUrl "http://10.110.53.17:8010" `
+  -EmailHost "smtp.yandex.ru" `
+  -EmailPort 465 `
+  -EmailUser "docflow-notify@yandex.ru" `
+  -EmailPassword "ПАРОЛЬ_ПРИЛОЖЕНИЯ_ЯНДЕКС" `
+  -EmailSecurity "ssl"
+
+E:\DocFlow\venv\Scripts\python.exe manage.py send_test_email "ПОЛУЧАТЕЛЬ@COMPANY.RU"
+```
+
+Ожидающие и не отправленные письма можно обработать вручную:
+
+```powershell
+.\deployment\run-email-queue.ps1 `
+  -DbPassword "ПАРОЛЬ_SQL_ПОЛЬЗОВАТЕЛЯ" `
+  -SecretKey "ДЛИННАЯ_СЛУЧАЙНАЯ_СТРОКА" `
+  -EmailPassword "ПАРОЛЬ_ПРИЛОЖЕНИЯ_ЯНДЕКС"
+```
+
+Для автоматических повторных попыток этот скрипт следует запускать Планировщиком заданий Windows
+каждые 5 минут. Новые письма при рабочем SMTP отправляются сразу, поэтому задача нужна прежде всего
+для повторения временно неудачных отправок.
+
+В службе NSSM откройте `nssm edit DocFlow` и добавьте в `Arguments` параметры от `-BaseUrl` до
+`-DefaultFromEmail` из примера выше. После сохранения перезапустите службу:
+
+```powershell
+Restart-Service DocFlow
+```
+
+Email-адрес каждого получателя должен быть заполнен в Django Admin в карточке пользователя.
+Журнал писем доступен в Django Admin в разделе `Отправки email`.
+
 ## Если страница не открывается с другого компьютера
 
 Проверить:

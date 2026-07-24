@@ -1,11 +1,27 @@
+import logging
 from datetime import timedelta
+from html import escape
 
+from django.conf import settings
 from django.core.mail import send_mail
 from django.db import transaction
+from django.db.models import Q
+from django.utils.html import linebreaks
 from django.utils import timezone
 
-from .models import ApprovalRoute, ApprovalTask, AuditLog, Document, DocumentComment, Notification
+from .models import (
+    ApprovalRoute,
+    ApprovalTask,
+    AuditLog,
+    Document,
+    DocumentComment,
+    EmailDelivery,
+    Notification,
+)
 from .user_display import user_identity
+
+
+logger = logging.getLogger(__name__)
 
 
 def log_action(user, document, action, message, request=None):
@@ -23,15 +39,126 @@ def log_action(user, document, action, message, request=None):
     )
 
 
-def notify_user(user, subject, message):
-    if user.email:
-        send_mail(subject, message, None, [user.email], fail_silently=True)
+def absolute_docflow_url(link_url):
+    if not link_url:
+        return settings.DOCFLOW_BASE_URL
+    if link_url.startswith(("http://", "https://")):
+        return link_url
+    return f"{settings.DOCFLOW_BASE_URL}/{link_url.lstrip('/')}"
 
 
-def create_notification(recipient, document, notification_type, title, message, link_url=""):
+def queue_notification_email(notification, subject=None, message=None):
+    recipient_email = (notification.recipient.email or "").strip()
+    if not recipient_email:
+        return None
+
+    delivery = EmailDelivery.objects.create(
+        notification=notification,
+        recipient_email=recipient_email,
+        subject=subject or notification.title,
+        message=message or notification.message,
+        link_url=absolute_docflow_url(notification.link_url),
+    )
+    if settings.DOCFLOW_EMAIL_SEND_IMMEDIATELY:
+        transaction.on_commit(lambda delivery_id=delivery.pk: deliver_email(delivery_id))
+    return delivery
+
+
+def _email_bodies(delivery):
+    text_body = delivery.message.strip()
+    if delivery.link_url:
+        text_body = f"{text_body}\n\nОткрыть документ в DocFlow:\n{delivery.link_url}"
+
+    escaped_subject = escape(delivery.subject)
+    escaped_message = linebreaks(escape(delivery.message))
+    link_html = ""
+    if delivery.link_url:
+        escaped_link = escape(delivery.link_url, quote=True)
+        link_html = (
+            '<p style="margin:24px 0 0;">'
+            f'<a href="{escaped_link}" style="display:inline-block;padding:11px 18px;'
+            'background:#f58220;color:#ffffff;text-decoration:none;border-radius:4px;">'
+            "Открыть документ</a></p>"
+        )
+    html_body = (
+        '<div style="font-family:Arial,sans-serif;max-width:640px;color:#1f2933;line-height:1.5;">'
+        f'<h2 style="font-size:20px;margin:0 0 16px;">{escaped_subject}</h2>'
+        f"{escaped_message}{link_html}"
+        '<p style="margin-top:28px;color:#667085;font-size:12px;">'
+        "Письмо отправлено автоматически системой DocFlow. Отвечать на него не нужно.</p></div>"
+    )
+    return text_body, html_body
+
+
+def deliver_email(delivery_id):
+    delivery = EmailDelivery.objects.get(pk=delivery_id)
+    if delivery.status == EmailDelivery.SENT:
+        return True
+
+    delivery.attempts += 1
+    delivery.save(update_fields=["attempts", "updated_at"])
+    text_body, html_body = _email_bodies(delivery)
+
+    try:
+        sent_count = send_mail(
+            delivery.subject,
+            text_body,
+            None,
+            [delivery.recipient_email],
+            fail_silently=False,
+            html_message=html_body,
+        )
+        if sent_count != 1:
+            raise RuntimeError("Почтовый сервер не подтвердил отправку письма.")
+    except Exception as exc:
+        retry_minutes = min(5 * (2 ** max(delivery.attempts - 1, 0)), 60)
+        delivery.status = EmailDelivery.FAILED
+        delivery.last_error = str(exc)[:4000]
+        delivery.next_attempt_at = timezone.now() + timedelta(minutes=retry_minutes)
+        delivery.save(update_fields=["status", "last_error", "next_attempt_at", "updated_at"])
+        logger.exception("Email delivery %s failed", delivery.pk)
+        return False
+
+    delivery.status = EmailDelivery.SENT
+    delivery.last_error = ""
+    delivery.next_attempt_at = None
+    delivery.sent_at = timezone.now()
+    delivery.save(
+        update_fields=["status", "last_error", "next_attempt_at", "sent_at", "updated_at"]
+    )
+    return True
+
+
+def process_email_queue(limit=50):
+    now = timezone.now()
+    deliveries = EmailDelivery.objects.filter(
+        Q(status=EmailDelivery.PENDING) | Q(status=EmailDelivery.FAILED),
+        attempts__lt=settings.DOCFLOW_EMAIL_MAX_ATTEMPTS,
+    ).filter(Q(next_attempt_at__isnull=True) | Q(next_attempt_at__lte=now)).order_by("created_at")[:limit]
+
+    sent = 0
+    failed = 0
+    for delivery in deliveries:
+        if deliver_email(delivery.pk):
+            sent += 1
+        else:
+            failed += 1
+    return sent, failed
+
+
+def create_notification(
+    recipient,
+    document,
+    notification_type,
+    title,
+    message,
+    link_url="",
+    email_subject=None,
+    email_message=None,
+):
     if not recipient:
         return None
-    return Notification.objects.create(
+    notification = Notification.objects.create(
         recipient=recipient,
         document=document,
         notification_type=notification_type,
@@ -39,14 +166,11 @@ def create_notification(recipient, document, notification_type, title, message, 
         message=message,
         link_url=link_url or f"/documents/{document.id}/",
     )
+    queue_notification_email(notification, email_subject, email_message)
+    return notification
 
 
 def notify_approval_required(user, document):
-    notify_user(
-        user,
-        f"Документ {document.system_number} поступил на согласование",
-        f"Необходимо согласовать документ: {document.title}.",
-    )
     create_notification(
         user,
         document,
@@ -54,11 +178,12 @@ def notify_approval_required(user, document):
         f"Требуется согласование {document.system_number}",
         f"Документ '{document.title}' поступил вам на согласование.",
         f"/documents/{document.id}/",
+        email_subject=f"Документ {document.system_number} поступил на согласование",
+        email_message=f"Необходимо согласовать документ: {document.title}.",
     )
 
 
 def notify_status_change(user, document, title, message):
-    notify_user(user, title, message)
     create_notification(user, document, Notification.STATUS_CHANGED, title, message)
 
 

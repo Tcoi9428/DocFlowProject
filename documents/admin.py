@@ -15,6 +15,7 @@ from .models import (
     DocumentComment,
     DocumentPurpose,
     DocumentType,
+    EmailDelivery,
     Notification,
     PasswordResetRequest,
     UserProfile,
@@ -154,6 +155,27 @@ class NotificationAdmin(admin.ModelAdmin):
     list_display = ["created_at", "recipient", "notification_type", "title", "is_read"]
     list_filter = ["notification_type", "is_read", "created_at"]
     search_fields = ["recipient__username", "title", "message", "document__system_number"]
+
+
+@admin.register(EmailDelivery)
+class EmailDeliveryAdmin(admin.ModelAdmin):
+    list_display = ["created_at", "recipient_email", "subject", "status", "attempts", "sent_at"]
+    list_filter = ["status", "created_at", "sent_at"]
+    search_fields = ["recipient_email", "subject", "message", "notification__document__system_number"]
+    readonly_fields = [
+        "notification",
+        "recipient_email",
+        "subject",
+        "message",
+        "link_url",
+        "status",
+        "attempts",
+        "last_error",
+        "next_attempt_at",
+        "sent_at",
+        "created_at",
+        "updated_at",
+    ]
 
 
 @admin.register(PasswordResetRequest)
