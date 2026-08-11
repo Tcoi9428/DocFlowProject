@@ -1,4 +1,5 @@
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.core import mail
@@ -66,7 +67,8 @@ class DocumentWorkflowTests(TestCase):
             route=self.route,
         )
 
-        start_approval(document, self.author)
+        with self.captureOnCommitCallbacks(execute=True):
+            start_approval(document, self.author)
         first_task = ApprovalTask.objects.get(document=document, approver=self.manager)
         approve_task(first_task, self.manager, "OK")
 
@@ -115,12 +117,50 @@ class DocumentWorkflowTests(TestCase):
         DocumentApprover.objects.create(document=document, approver=self.manager, name="Первый этап", order=1)
         DocumentApprover.objects.create(document=document, approver=self.director, name="Второй этап", order=2)
 
-        start_approval(document, self.author)
+        with self.captureOnCommitCallbacks(execute=True):
+            start_approval(document, self.author)
         first_task = ApprovalTask.objects.get(document=document, approver=self.manager)
 
         approve_task(first_task, self.manager, "OK")
 
         self.assertTrue(ApprovalTask.objects.filter(document=document, approver=self.director).exists())
+
+    def test_approval_recovers_missing_configured_approver_link(self):
+        document = Document.objects.create(
+            document_type=self.document_type,
+            title="Legacy custom approval",
+            author=self.author,
+        )
+        DocumentApprover.objects.create(document=document, approver=self.manager, order=1)
+        DocumentApprover.objects.create(document=document, approver=self.director, order=2)
+        start_approval(document, self.author)
+        first_task = ApprovalTask.objects.get(document=document, approver=self.manager)
+        first_task.configured_approver = None
+        first_task.save(update_fields=["configured_approver", "updated_at"])
+
+        approve_task(first_task, self.manager, "OK")
+
+        self.assertTrue(
+            ApprovalTask.objects.filter(
+                document=document,
+                approver=self.director,
+                status=ApprovalTask.PENDING,
+            ).exists()
+        )
+
+    def test_approval_finishes_orphan_task_without_route(self):
+        document = Document.objects.create(
+            document_type=self.document_type,
+            title="Legacy approval without route",
+            author=self.author,
+            status=Document.ON_APPROVAL,
+        )
+        task = ApprovalTask.objects.create(document=document, approver=self.manager)
+
+        approve_task(task, self.manager, "OK")
+        document.refresh_from_db()
+
+        self.assertEqual(document.status, Document.APPROVED)
 
     def test_start_approval_creates_notification_for_approver(self):
         document = Document.objects.create(
@@ -131,7 +171,8 @@ class DocumentWorkflowTests(TestCase):
         )
         DocumentApprover.objects.create(document=document, approver=self.manager, name="Первый этап", order=1)
 
-        start_approval(document, self.author)
+        with self.captureOnCommitCallbacks(execute=True):
+            start_approval(document, self.author)
 
         self.assertTrue(
             Notification.objects.filter(
@@ -156,7 +197,8 @@ class DocumentWorkflowTests(TestCase):
             route=self.route,
         )
 
-        start_approval(document, self.author)
+        with self.captureOnCommitCallbacks(execute=True):
+            start_approval(document, self.author)
 
         delivery = EmailDelivery.objects.get(notification__document=document)
         self.assertEqual(delivery.recipient_email, "manager@example.com")
@@ -177,7 +219,8 @@ class DocumentWorkflowTests(TestCase):
             author=self.author,
             route=self.route,
         )
-        start_approval(document, self.author)
+        with self.captureOnCommitCallbacks(execute=True):
+            start_approval(document, self.author)
         delivery = EmailDelivery.objects.get(notification__document=document)
 
         result = deliver_email(delivery.pk)
@@ -207,7 +250,8 @@ class DocumentWorkflowTests(TestCase):
         task.due_date = timezone.localdate() + timedelta(days=1)
         task.save(update_fields=["due_date", "updated_at"])
 
-        first_count = process_approval_reminders()
+        with self.captureOnCommitCallbacks(execute=True):
+            first_count = process_approval_reminders()
         second_count = process_approval_reminders()
 
         task.refresh_from_db()
@@ -238,7 +282,8 @@ class DocumentWorkflowTests(TestCase):
         )
         start_approval(document, self.author)
         approve_task(ApprovalTask.objects.get(document=document, approver=self.manager), self.manager)
-        approve_task(ApprovalTask.objects.get(document=document, approver=self.director), self.director)
+        with self.captureOnCommitCallbacks(execute=True):
+            approve_task(ApprovalTask.objects.get(document=document, approver=self.director), self.director)
 
         notification = Notification.objects.get(
             recipient=responsible,
@@ -261,7 +306,8 @@ class DocumentWorkflowTests(TestCase):
         start_approval(document, self.author)
         task = ApprovalTask.objects.get(document=document, approver=self.manager)
 
-        return_for_revision(task, self.manager, comment="Уточнить условия")
+        with self.captureOnCommitCallbacks(execute=True):
+            return_for_revision(task, self.manager, comment="Уточнить условия")
 
         notification = Notification.objects.get(
             recipient=self.director,
@@ -271,6 +317,29 @@ class DocumentWorkflowTests(TestCase):
         self.assertIn("Уточнить условия", notification.message)
         self.assertTrue(hasattr(notification, "email_delivery"))
         self.assertIn(f"/documents/{document.pk}/", notification.email_delivery.link_url)
+
+    @override_settings(DOCFLOW_EMAIL_SEND_IMMEDIATELY=False)
+    def test_email_queue_failure_does_not_rollback_approval(self):
+        self.author.email = "author@example.com"
+        self.author.save(update_fields=["email"])
+        document = Document.objects.create(
+            document_type=self.document_type,
+            title="Согласование независимо от почты",
+            author=self.author,
+            route=self.route,
+        )
+        start_approval(document, self.author)
+        task = ApprovalTask.objects.get(document=document, approver=self.manager)
+
+        with patch(
+            "documents.services.queue_notification_email_by_id",
+            side_effect=RuntimeError("Email queue is unavailable"),
+        ):
+            with self.captureOnCommitCallbacks(execute=True):
+                approve_task(task, self.manager, comment="Согласовано")
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, ApprovalTask.APPROVED)
 
     def test_return_for_revision_keeps_document_responsible_and_saves_comment(self):
         document = Document.objects.create(

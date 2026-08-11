@@ -64,6 +64,15 @@ def queue_notification_email(notification, subject=None, message=None):
     return delivery
 
 
+def queue_notification_email_by_id(notification_id, subject=None, message=None):
+    try:
+        notification = Notification.objects.select_related("recipient").get(pk=notification_id)
+    except Notification.DoesNotExist:
+        logger.warning("Notification %s was deleted before email queueing", notification_id)
+        return None
+    return queue_notification_email(notification, subject, message)
+
+
 def _email_bodies(delivery):
     text_body = delivery.message.strip()
     if delivery.link_url:
@@ -201,7 +210,15 @@ def create_notification(
         message=message,
         link_url=link_url or f"/documents/{document.id}/",
     )
-    queue_notification_email(notification, email_subject, email_message)
+    if notification.recipient.email:
+        transaction.on_commit(
+            lambda notification_id=notification.pk: queue_notification_email_by_id(
+                notification_id,
+                email_subject,
+                email_message,
+            ),
+            robust=True,
+        )
     return notification
 
 
@@ -277,6 +294,8 @@ def approve_task(task, user, comment="", request=None):
     task.save(update_fields=["status", "comment", "completed_at", "updated_at"])
     document = task.document
     route = document.route
+    if route is None and task.step_id:
+        route = task.step.route
     approver_name = user_identity(user)
 
     log_action(user, document, AuditLog.APPROVE, f"Согласовано: {comment}".strip(), request)
@@ -287,14 +306,20 @@ def approve_task(task, user, comment="", request=None):
         f"Документ согласован пользователем {approver_name}.",
     )
 
-    if task.configured_approver_id:
+    configured_approver = task.configured_approver
+    if configured_approver is None:
+        configured_approver = document.configured_approvers.filter(
+            approver_id=task.approver_id
+        ).order_by("order").first()
+
+    if configured_approver:
         if route and route.route_type == ApprovalRoute.PARALLEL:
             if not document.approval_tasks.filter(status=ApprovalTask.PENDING).exists():
                 _finish_document_approval(document)
             return
 
         next_approver = document.configured_approvers.filter(
-            order__gt=task.configured_approver.order
+            order__gt=configured_approver.order
         ).order_by("order").first()
         if next_approver:
             ApprovalTask.objects.create(
@@ -308,21 +333,30 @@ def approve_task(task, user, comment="", request=None):
             _finish_document_approval(document)
         return
 
-    if route.route_type == ApprovalRoute.PARALLEL:
+    if route and route.route_type == ApprovalRoute.PARALLEL:
         if not document.approval_tasks.filter(status=ApprovalTask.PENDING).exists():
             _finish_document_approval(document)
         return
 
-    next_step = route.steps.filter(order__gt=task.step.order).order_by("order").first()
-    if next_step:
-        ApprovalTask.objects.create(
-            document=document,
-            step=next_step,
-            approver=next_step.approver,
-            due_date=timezone.localdate() + timedelta(days=next_step.due_days),
-        )
-        notify_approval_required(next_step.approver, document)
-    else:
+    if route and task.step_id:
+        next_step = route.steps.filter(order__gt=task.step.order).order_by("order").first()
+        if next_step:
+            ApprovalTask.objects.create(
+                document=document,
+                step=next_step,
+                approver=next_step.approver,
+                due_date=timezone.localdate() + timedelta(days=next_step.due_days),
+            )
+            notify_approval_required(next_step.approver, document)
+        else:
+            _finish_document_approval(document)
+        return
+
+    logger.warning(
+        "Approval task %s has no route, step, or configured approver; using pending tasks as fallback",
+        task.pk,
+    )
+    if not document.approval_tasks.filter(status=ApprovalTask.PENDING).exists():
         _finish_document_approval(document)
 
 
