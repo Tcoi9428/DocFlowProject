@@ -5,8 +5,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}DocFlow{% endblock %}</title>
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260720-2">
-    <script src="{% static 'js/app.js' %}?v=20260720-2" defer></script>
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260902-2">
+    <script src="{% static 'js/app.js' %}?v=20260902-4" defer></script>
 </head>
 <body class="{% if user.is_authenticated %}is-authenticated{% else %}is-anonymous{% endif %}">
 <svg class="icon-sprite" aria-hidden="true">
@@ -18,6 +18,7 @@
     <symbol id="icon-settings" viewBox="0 0 24 24"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2 2-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V20h-4v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1-2-2 .1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H4v-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1 2-2 .1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.5V4h4v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1 2 2-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.5 1h.1v4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
     <symbol id="icon-bell" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 7h18s-3 0-3-7"/><path d="M10 19a2 2 0 0 0 4 0"/></symbol>
     <symbol id="icon-message" viewBox="0 0 24 24"><path d="M4 5h16v12H7l-3 3z"/><path d="M8 9h8"/><path d="M8 13h5"/></symbol>
+    <symbol id="icon-mail" viewBox="0 0 24 24"><path d="M3 5h18v14H3z"/><path d="m3 7 9 6 9-6"/></symbol>
     <symbol id="icon-logout" viewBox="0 0 24 24"><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/><path d="M21 3v18h-8"/></symbol>
     <symbol id="icon-search" viewBox="0 0 24 24"><path d="M11 19a8 8 0 1 1 0-16 8 8 0 0 1 0 16z"/><path d="M21 21l-4.3-4.3"/></symbol>
     <symbol id="icon-menu" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h16"/></symbol>
@@ -47,6 +48,9 @@
                     <span class="nav-icon"><svg><use href="#icon-check"></use></svg></span>
                     <span>На согласовании</span>
                     {% if approval_badge_count %}<span class="menu-badge">{{ approval_badge_count }}</span>{% endif %}
+                </a>
+                <a class="{% if '/correspondence/' in request.path %}active{% endif %}" href="{% url 'documents:correspondence_section' 'outgoing' %}">
+                    <span class="nav-icon"><svg><use href="#icon-mail"></use></svg></span> Корреспонденция
                 </a>
                 <a class="{% if request.resolver_match.url_name == 'archive' %}active{% endif %}" href="{% url 'documents:archive' %}">
                     <span class="nav-icon"><svg><use href="#icon-archive"></use></svg></span> Архив

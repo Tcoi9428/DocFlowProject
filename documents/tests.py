@@ -1,17 +1,31 @@
 from datetime import timedelta
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
+from zipfile import ZipFile
+from io import BytesIO
+import xml.etree.ElementTree as ET
 
 from django.contrib.auth.models import User
 from django.core import mail
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
+from .correspondence import (
+    attach_generated_outgoing_template,
+    build_outgoing_letter_template,
+    reserve_correspondence_number,
+)
 from .forms import DocumentForm
 from .models import (
     ApprovalRoute,
     ApprovalStep,
     ApprovalTask,
     ContractKind,
+    CorrespondenceDepartment,
+    CorrespondenceRecord,
+    CorrespondenceSequence,
     Document,
     DocumentApprover,
     DocumentComment,
@@ -20,11 +34,13 @@ from .models import (
     Notification,
     DocumentType,
     PasswordResetRequest,
+    RevisionRequest,
 )
 from .services import (
     approve_task,
     deliver_email,
     process_approval_reminders,
+    resubmit_parallel_approval,
     return_for_revision,
     start_approval,
 )
@@ -124,6 +140,155 @@ class DocumentWorkflowTests(TestCase):
         approve_task(first_task, self.manager, "OK")
 
         self.assertTrue(ApprovalTask.objects.filter(document=document, approver=self.director).exists())
+
+    def test_user_can_choose_parallel_mode_for_custom_approvers(self):
+        document = Document.objects.create(
+            document_type=self.document_type,
+            title="Параллельный пользовательский маршрут",
+            author=self.author,
+            responsible=self.author,
+            route=self.route,
+            approval_route_type=ApprovalRoute.PARALLEL,
+        )
+        DocumentApprover.objects.create(document=document, approver=self.manager, order=1)
+        DocumentApprover.objects.create(document=document, approver=self.director, order=2)
+
+        start_approval(document, self.author)
+
+        self.assertEqual(
+            ApprovalTask.objects.filter(
+                document=document,
+                document_version=1,
+                status=ApprovalTask.PENDING,
+            ).count(),
+            2,
+        )
+
+    def test_parallel_return_does_not_block_other_approvers(self):
+        document = Document.objects.create(
+            document_type=self.document_type,
+            title="Независимое параллельное согласование",
+            author=self.author,
+            responsible=self.author,
+            route=self.route,
+            approval_route_type=ApprovalRoute.PARALLEL,
+        )
+        DocumentApprover.objects.create(document=document, approver=self.manager, order=1)
+        DocumentApprover.objects.create(document=document, approver=self.director, order=2)
+        start_approval(document, self.author)
+        manager_task = ApprovalTask.objects.get(document=document, approver=self.manager)
+        director_task = ApprovalTask.objects.get(document=document, approver=self.director)
+
+        return_for_revision(manager_task, self.manager, comment="Исправить цену")
+        document.refresh_from_db()
+        director_task.refresh_from_db()
+
+        self.assertEqual(document.status, Document.ON_APPROVAL)
+        self.assertEqual(director_task.status, ApprovalTask.PENDING)
+        self.assertTrue(
+            RevisionRequest.objects.filter(
+                document=document,
+                requested_by=self.manager,
+                status=RevisionRequest.OPEN,
+            ).exists()
+        )
+
+        return_for_revision(director_task, self.director, comment="Уточнить срок")
+        document.refresh_from_db()
+
+        self.assertEqual(document.status, Document.RETURNED)
+        self.assertEqual(document.revision_requests.filter(status=RevisionRequest.OPEN).count(), 2)
+
+    def test_parallel_resubmit_targets_only_participants_with_comments(self):
+        document = Document.objects.create(
+            document_type=self.document_type,
+            title="Выборочное повторное согласование",
+            author=self.author,
+            responsible=self.author,
+            route=self.route,
+            approval_route_type=ApprovalRoute.PARALLEL,
+        )
+        DocumentApprover.objects.create(document=document, approver=self.manager, order=1)
+        DocumentApprover.objects.create(document=document, approver=self.director, order=2)
+        start_approval(document, self.author)
+        manager_task = ApprovalTask.objects.get(document=document, approver=self.manager)
+        director_task = ApprovalTask.objects.get(document=document, approver=self.director)
+        approve_task(manager_task, self.manager, "Согласовано")
+        return_for_revision(director_task, self.director, comment="Добавить срок поставки")
+        revision_request = document.revision_requests.get(status=RevisionRequest.OPEN)
+
+        resubmit_parallel_approval(
+            document,
+            self.author,
+            {revision_request.pk: "Срок поставки добавлен в раздел 4."},
+        )
+        document.refresh_from_db()
+        revision_request.refresh_from_db()
+
+        self.assertEqual(document.version, 2)
+        self.assertEqual(document.status, Document.ON_APPROVAL)
+        self.assertEqual(revision_request.status, RevisionRequest.RESOLVED)
+        self.assertEqual(revision_request.resolved_in_version, 2)
+        self.assertFalse(
+            ApprovalTask.objects.filter(
+                document=document,
+                approver=self.manager,
+                document_version=2,
+                status=ApprovalTask.PENDING,
+            ).exists()
+        )
+        retry_task = ApprovalTask.objects.get(
+            document=document,
+            approver=self.director,
+            document_version=2,
+            status=ApprovalTask.PENDING,
+        )
+        self.assertTrue(
+            Notification.objects.filter(
+                recipient=self.manager,
+                document=document,
+                title__icontains="версии 2",
+            ).exists()
+        )
+
+        approve_task(retry_task, self.director, "Замечание устранено")
+        document.refresh_from_db()
+
+        self.assertEqual(document.status, Document.APPROVED)
+
+    def test_parallel_revision_page_shows_separate_correction_fields(self):
+        document = Document.objects.create(
+            document_type=self.document_type,
+            title="Два замечания к документу",
+            author=self.author,
+            responsible=self.author,
+            route=self.route,
+            approval_route_type=ApprovalRoute.PARALLEL,
+        )
+        DocumentApprover.objects.create(document=document, approver=self.manager, order=1)
+        DocumentApprover.objects.create(document=document, approver=self.director, order=2)
+        start_approval(document, self.author)
+        return_for_revision(
+            ApprovalTask.objects.get(document=document, approver=self.manager),
+            self.manager,
+            comment="Исправить цену",
+        )
+        return_for_revision(
+            ApprovalTask.objects.get(document=document, approver=self.director),
+            self.director,
+            comment="Уточнить срок",
+        )
+        revision_requests = list(document.revision_requests.order_by("id"))
+        self.client.force_login(self.author)
+
+        response = self.client.get(f"/documents/{document.pk}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Замечания к версии 1")
+        self.assertContains(response, "Исправить цену")
+        self.assertContains(response, "Уточнить срок")
+        for revision_request in revision_requests:
+            self.assertContains(response, f'name="correction_{revision_request.pk}"')
 
     def test_approval_recovers_missing_configured_approver_link(self):
         document = Document.objects.create(
@@ -472,5 +637,327 @@ class DocumentWorkflowTests(TestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertContains(response, "Страница не найдена", status_code=404)
+
+
+class OutgoingCorrespondenceTests(TestCase):
+    def setUp(self):
+        self.media_directory = TemporaryDirectory()
+        self.media_override = override_settings(MEDIA_ROOT=Path(self.media_directory.name))
+        self.media_override.enable()
+        self.addCleanup(self.media_override.disable)
+        self.addCleanup(self.media_directory.cleanup)
+
+        self.user = User.objects.create_user(
+            username="registrar",
+            password="test",
+            first_name="Иван",
+            last_name="Иванов",
+        )
+        self.other_user = User.objects.create_user(username="second", password="test")
+        self.department, _ = CorrespondenceDepartment.objects.update_or_create(
+            code="02",
+            defaults={"name": "Инжиниринг", "is_active": True},
+        )
+        CorrespondenceSequence.objects.update_or_create(
+            kind=CorrespondenceRecord.OUTGOING,
+            defaults={"next_number": 657},
+        )
+
+    def test_reserved_number_is_reused_for_same_user_and_unique_for_another_user(self):
+        first = reserve_correspondence_number(self.user, CorrespondenceRecord.OUTGOING)
+        repeated = reserve_correspondence_number(self.user, CorrespondenceRecord.OUTGOING)
+        second = reserve_correspondence_number(self.other_user, CorrespondenceRecord.OUTGOING)
+
+        self.assertEqual(first.pk, repeated.pk)
+        self.assertEqual(first.sequence_number, 657)
+        self.assertEqual(first.reserved_number, "01-__-657")
+        self.assertEqual(second.sequence_number, 658)
+
+    def test_registration_form_shows_current_date_in_html_calendar(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get("/correspondence/outgoing/new/")
+
+        self.assertContains(
+            response,
+            f'value="{timezone.localdate():%Y-%m-%d}"',
+            html=False,
+        )
+        self.assertContains(response, 'data-searchable-select="true"', count=2)
+        self.assertNotContains(response, "data-select-filter")
+
+    def test_word_template_contains_generated_registration_number(self):
+        subject = "О согласовании поставки запасных частей & оборудования"
+        addressee = 'ООО "Заказчик & Партнеры"'
+        addressee_person = "Иван Иванович"
+        payload = build_outgoing_letter_template(
+            "01-02-657",
+            subject,
+            addressee,
+            addressee_person,
+        )
+
+        with ZipFile(BytesIO(payload)) as document:
+            document_xml = document.read("word/document.xml")
+            header_xml = document.read("word/header2.xml").decode("utf-8")
+
+        word_namespace = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+        root = ET.fromstring(document_xml)
+        first_row = next(root.iter(word_namespace + "tr"))
+        cells = first_row.findall(word_namespace + "tc")
+        marker_text = "".join((node.text or "") for node in cells[0].iter(word_namespace + "t"))
+        number_text = "".join((node.text or "") for node in cells[1].iter(word_namespace + "t"))
+
+        self.assertEqual(marker_text, "№")
+        self.assertEqual(number_text, "01-02-657")
+        document_text = "".join((node.text or "") for node in root.iter(word_namespace + "t"))
+        self.assertIn(subject, document_text)
+        self.assertNotIn("О О согласовании", document_text)
+        self.assertIn(addressee, document_text)
+        self.assertIn(f"Уважаемый {addressee_person}!", document_text)
+        self.assertNotIn("Наименование компании ХХ «ХХХ»", document_text)
+        self.assertIn("Сервис-Инжиниринг", header_xml)
+
+    def test_template_download_attaches_draft_to_reservation(self):
+        record = reserve_correspondence_number(self.user, CorrespondenceRecord.OUTGOING)
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            f"/correspondence/outgoing/{record.pk}/template/",
+            {
+                "department": self.department.pk,
+                "subject": "О согласовании поставки запасных частей",
+                "addressee": "ООО Заказчик",
+                "addressee_person": "Иван Иванович",
+            },
+        )
+        record.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(record.registration_number, "01-02-657")
+        self.assertTrue(record.draft_file)
+        self.assertEqual(record.draft_original_name, "Исходящее письмо 01-02-657.docx")
+        self.assertEqual(record.subject, "О согласовании поставки запасных частей")
+
+    def test_template_download_reuses_subject_from_existing_draft(self):
+        record = reserve_correspondence_number(self.user, CorrespondenceRecord.OUTGOING)
+        record.department = self.department
+        record.subject = "О ранее сформированном письме"
+        record.addressee = "ООО Заказчик"
+        record.addressee_person = "Иван Иванович"
+        attach_generated_outgoing_template(record)
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            f"/correspondence/outgoing/{record.pk}/template/",
+            {"department": self.department.pk},
+        )
+        record.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(record.subject, "О ранее сформированном письме")
+        self.assertTrue(record.draft_file)
+
+    def test_outgoing_letter_can_be_registered_without_signed_file(self):
+        record = reserve_correspondence_number(self.user, CorrespondenceRecord.OUTGOING)
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            "/correspondence/outgoing/new/",
+            {
+                "reservation_id": record.pk,
+                "department": self.department.pk,
+                "reply_to": "",
+                "related_document_number": "ВХ-2025-104",
+                "addressee": "ООО Заказчик",
+                "addressee_person": "Директору Петрову П.П.",
+                "subject": "О согласовании поставки запасных частей",
+                "registration_date": "2026-09-01",
+                "executor": self.user.pk,
+            },
+        )
+        record.refresh_from_db()
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(record.status, CorrespondenceRecord.REGISTERED)
+        self.assertEqual(record.registration_number, "01-02-657")
+        self.assertEqual(record.related_document_number, "ВХ-2025-104")
+        self.assertFalse(record.has_signed_document)
+
+        registry_response = self.client.get("/correspondence/outgoing/?scope=all")
+        self.assertContains(registry_response, "01-02-657")
+        self.assertContains(registry_response, "Не прикреплен")
+
+    def test_signed_document_can_be_added_after_registration(self):
+        record = CorrespondenceRecord.objects.create(
+            kind=CorrespondenceRecord.OUTGOING,
+            status=CorrespondenceRecord.REGISTERED,
+            sequence_number=657,
+            registration_number="01-02-657",
+            department=self.department,
+            addressee="ООО Заказчик",
+            addressee_person="Директору",
+            subject="Письмо",
+            executor=self.user,
+            created_by=self.user,
+        )
+        self.client.force_login(self.user)
+        uploaded_file = SimpleUploadedFile("signed.pdf", b"signed document", content_type="application/pdf")
+
+        response = self.client.post(
+            f"/correspondence/outgoing/{record.pk}/signed-file/",
+            {"signed_file": uploaded_file},
+        )
+        record.refresh_from_db()
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(record.signed_file)
+        self.assertEqual(record.signed_original_name, "signed.pdf")
+
+
+class IncomingCorrespondenceTests(TestCase):
+    def setUp(self):
+        self.media_directory = TemporaryDirectory()
+        self.media_override = override_settings(MEDIA_ROOT=Path(self.media_directory.name))
+        self.media_override.enable()
+        self.addCleanup(self.media_override.disable)
+        self.addCleanup(self.media_directory.cleanup)
+
+        self.user = User.objects.create_user(
+            username="incoming_registrar",
+            password="test",
+            first_name="Петр",
+            last_name="Петров",
+        )
+        self.other_user = User.objects.create_user(username="incoming_second", password="test")
+        self.department, _ = CorrespondenceDepartment.objects.update_or_create(
+            code="01",
+            defaults={"name": "Общий отдел", "is_active": True},
+        )
+        CorrespondenceSequence.objects.update_or_create(
+            kind=CorrespondenceRecord.INCOMING,
+            defaults={"next_number": 25},
+        )
+        self.outgoing = CorrespondenceRecord.objects.create(
+            kind=CorrespondenceRecord.OUTGOING,
+            status=CorrespondenceRecord.REGISTERED,
+            sequence_number=657,
+            registration_number="01-01-657",
+            department=self.department,
+            addressee="ООО Заказчик",
+            addressee_person="Директору",
+            subject="О направлении документов",
+            executor=self.user,
+            created_by=self.user,
+        )
+
+    def test_incoming_number_is_reserved_independently_for_each_user(self):
+        first = reserve_correspondence_number(self.user, CorrespondenceRecord.INCOMING)
+        repeated = reserve_correspondence_number(self.user, CorrespondenceRecord.INCOMING)
+        second = reserve_correspondence_number(self.other_user, CorrespondenceRecord.INCOMING)
+
+        self.assertEqual(first.pk, repeated.pk)
+        self.assertEqual(first.sequence_number, 25)
+        self.assertEqual(first.reserved_number, "02-__-25")
+        self.assertEqual(second.sequence_number, 26)
+
+    def test_incoming_registration_form_shows_current_date(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get("/correspondence/incoming/new/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Регистрация входящего письма")
+        self.assertContains(response, f'value="{timezone.localdate():%Y-%m-%d}"', html=False)
+        self.assertContains(response, "02-__-25")
+        self.assertContains(response, 'data-searchable-select="true"', count=1)
+        self.assertNotContains(response, "data-select-filter")
+
+    def test_incoming_letter_can_be_registered_with_outgoing_link(self):
+        record = reserve_correspondence_number(self.user, CorrespondenceRecord.INCOMING)
+        self.client.force_login(self.user)
+        uploaded_file = SimpleUploadedFile("received.pdf", b"received letter", content_type="application/pdf")
+
+        response = self.client.post(
+            "/correspondence/incoming/new/",
+            {
+                "reservation_id": record.pk,
+                "department": self.department.pk,
+                "subject": "Ответ на запрос документации",
+                "sender": "ООО Заказчик",
+                "related_outgoing": self.outgoing.pk,
+                "related_document_number": "СТАРЫЙ-НОМЕР",
+                "registration_date": "2026-09-02",
+                "resolution": "Передать в общий отдел",
+                "incoming_file": uploaded_file,
+            },
+        )
+        record.refresh_from_db()
+
+        self.assertRedirects(response, f"/correspondence/incoming/{record.pk}/")
+        self.assertEqual(record.status, CorrespondenceRecord.REGISTERED)
+        self.assertEqual(record.registration_number, "02-01-25")
+        self.assertEqual(record.related_outgoing, self.outgoing)
+        self.assertEqual(record.related_document_number, "")
+        self.assertEqual(record.created_by, self.user)
+        self.assertEqual(record.executor, self.user)
+        self.assertTrue(record.incoming_file)
+        self.assertEqual(record.incoming_original_name, "received.pdf")
+
+        outgoing_response = self.client.get(f"/correspondence/outgoing/{self.outgoing.pk}/")
+        self.assertContains(outgoing_response, "02-01-25")
+        self.assertContains(outgoing_response, "Ответ на запрос документации")
+
+    def test_manual_related_number_is_preserved_for_old_registry(self):
+        record = reserve_correspondence_number(self.user, CorrespondenceRecord.INCOMING)
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            "/correspondence/incoming/new/",
+            {
+                "reservation_id": record.pk,
+                "department": self.department.pk,
+                "subject": "Письмо из старого реестра",
+                "sender": "АО Поставщик",
+                "related_outgoing": "",
+                "related_document_number": "ИСХ-2025-104",
+                "registration_date": "2026-09-02",
+                "resolution": "",
+            },
+        )
+        record.refresh_from_db()
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIsNone(record.related_outgoing)
+        self.assertEqual(record.related_document_number, "ИСХ-2025-104")
+
+    def test_incoming_file_can_be_attached_after_registration(self):
+        record = CorrespondenceRecord.objects.create(
+            kind=CorrespondenceRecord.INCOMING,
+            status=CorrespondenceRecord.REGISTERED,
+            sequence_number=25,
+            registration_number="02-01-25",
+            department=self.department,
+            sender="ООО Заказчик",
+            subject="Входящее письмо",
+            executor=self.user,
+            created_by=self.user,
+        )
+        self.client.force_login(self.user)
+        uploaded_file = SimpleUploadedFile("incoming.pdf", b"incoming letter", content_type="application/pdf")
+
+        response = self.client.post(
+            f"/correspondence/incoming/{record.pk}/file/",
+            {"incoming_file": uploaded_file},
+        )
+        record.refresh_from_db()
+
+        self.assertRedirects(response, f"/correspondence/incoming/{record.pk}/")
+        self.assertTrue(record.incoming_file)
+        self.assertEqual(record.incoming_original_name, "incoming.pdf")
+
+        registry_response = self.client.get("/correspondence/incoming/?scope=all")
+        self.assertContains(registry_response, "02-01-25")
+        self.assertContains(registry_response, "Прикреплен")
 
 # Create your tests here.

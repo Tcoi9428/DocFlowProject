@@ -33,6 +33,7 @@
             {% endif %}
             <dt>Статус</dt><dd>{{ document.get_status_display }}</dd>
             <dt>Версия</dt><dd>Версия {{ document.version }}</dd>
+            <dt>Тип согласования</dt><dd>{{ document.get_approval_route_type_display }}</dd>
             <dt>Внутренний номер</dt><dd>{{ document.internal_number|default:"-" }}</dd>
             <dt>Инициатор</dt><dd>{% include "documents/partials/user_display.html" with person=document.author %}</dd>
             <dt>Ответственный</dt><dd>{% include "documents/partials/user_display.html" with person=document.responsible %}</dd>
@@ -84,7 +85,57 @@
     </div>
 </section>
 
-{% if can_work_on_revision %}
+{% if document.approval_route_type == "parallel" and open_revision_requests %}
+<section class="panel revision-panel">
+    <div class="revision-panel-header">
+        <div>
+            <h2>Замечания к версии {{ document.version }}</h2>
+            <p>Каждое замечание обрабатывается отдельно. Уже согласовавшие участники повторно согласовывать документ не будут.</p>
+        </div>
+        <span class="badge {% if document.status == 'returned' %}badge-warn{% endif %}">{{ document.get_status_display }}</span>
+    </div>
+    {% if document.status == "on_approval" %}
+        <p class="revision-waiting-note">Ожидаются решения остальных участников параллельного маршрута. После завершения этапа ответственный сможет подтвердить корректировки.</p>
+    {% endif %}
+
+    {% if can_work_on_revision %}
+        <form method="post" action="{% url 'documents:resubmit_after_revision' document.pk %}" class="form revision-form">
+            {% csrf_token %}
+            <div class="revision-request-grid">
+                {% for item in parallel_revision_items %}
+                    <article class="revision-request-card">
+                        <div class="revision-request-meta">
+                            <strong>{% include "documents/partials/user_display.html" with person=item.revision_request.requested_by %}</strong>
+                            <span>{{ item.revision_request.created_at|date:"d.m.Y H:i" }}</span>
+                        </div>
+                        <p class="revision-request-comment">{{ item.revision_request.comment|linebreaksbr }}</p>
+                        <div class="revision-correction-field">
+                            {{ item.field.label_tag }}
+                            {{ item.field }}
+                            {{ item.field.errors }}
+                        </div>
+                    </article>
+                {% endfor %}
+            </div>
+            <div class="actions">
+                <button class="primary" type="submit">Корректировки внесены, создать новую версию</button>
+            </div>
+        </form>
+    {% else %}
+        <div class="revision-request-grid">
+            {% for revision_request in open_revision_requests %}
+                <article class="revision-request-card">
+                    <div class="revision-request-meta">
+                        <strong>{% include "documents/partials/user_display.html" with person=revision_request.requested_by %}</strong>
+                        <span>{{ revision_request.created_at|date:"d.m.Y H:i" }}</span>
+                    </div>
+                    <p class="revision-request-comment">{{ revision_request.comment|linebreaksbr }}</p>
+                </article>
+            {% endfor %}
+        </div>
+    {% endif %}
+</section>
+{% elif can_work_on_revision %}
 <section class="panel revision-panel">
     <h2>Документ на доработке</h2>
     <div class="revision-summary">
@@ -112,6 +163,28 @@
         <dt>Дата возврата</dt><dd>{{ document.revision_requested_at|date:"d.m.Y H:i"|default:"-" }}</dd>
         <dt>Комментарий</dt><dd>{{ document.revision_comment|linebreaksbr|default:"-" }}</dd>
     </dl>
+</section>
+{% endif %}
+
+{% if resolved_revision_requests %}
+<section class="panel revision-history-panel">
+    <h2>История устранения замечаний</h2>
+    <div class="revision-request-grid">
+        {% for revision_request in resolved_revision_requests %}
+            <article class="revision-request-card is-resolved">
+                <div class="revision-request-meta">
+                    <strong>Замечание: {% include "documents/partials/user_display.html" with person=revision_request.requested_by %}</strong>
+                    <span>Версия {{ revision_request.document_version }}</span>
+                </div>
+                <p>{{ revision_request.comment|linebreaksbr }}</p>
+                <div class="revision-resolution">
+                    <strong>Исправлено в версии {{ revision_request.resolved_in_version }}</strong>
+                    <p>{{ revision_request.resolution_comment|linebreaksbr }}</p>
+                    <small>{% include "documents/partials/user_display.html" with person=revision_request.resolved_by %} · {{ revision_request.resolved_at|date:"d.m.Y H:i" }}</small>
+                </div>
+            </article>
+        {% endfor %}
+    </div>
 </section>
 {% endif %}
 

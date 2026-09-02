@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% load user_display %}
+
+{% block title %}{{ record.registration_number }} | DocFlow{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <h1>{{ record.subject }}</h1>
+        <p>{{ record.registration_number }} · Входящая корреспонденция</p>
+    </div>
+    <a class="button" href="{% url 'documents:correspondence_section' 'incoming' %}">К реестру</a>
+</section>
+
+<section class="grid-2 equal correspondence-detail-layout">
+    <div class="panel">
+        <div class="toolbar">
+            <h2>Регистрационные данные</h2>
+            <span class="badge badge-success">Зарегистрировано</span>
+        </div>
+        <dl class="details">
+            <dt>Номер документа</dt><dd><strong>{{ record.registration_number }}</strong></dd>
+            <dt>Подразделение</dt><dd>{{ record.department }}</dd>
+            <dt>Наименование</dt><dd>{{ record.subject }}</dd>
+            <dt>Отправитель</dt><dd>{{ record.sender }}</dd>
+            <dt>Дата</dt><dd>{{ record.registration_date|date:"d.m.Y" }}</dd>
+            <dt>Резолюция</dt><dd>{{ record.resolution|default:"-"|linebreaksbr }}</dd>
+            <dt>Регистратор</dt><dd>{% include "documents/partials/user_display.html" with person=record.created_by %}</dd>
+            <dt>Связанное исходящее</dt>
+            <dd>
+                {% if record.related_outgoing %}
+                    <a href="{% url 'documents:outgoing_correspondence_detail' record.related_outgoing.pk %}">{{ record.related_outgoing.registration_number }} · {{ record.related_outgoing.subject }}</a>
+                {% elif record.related_document_number %}
+                    {{ record.related_document_number }} <span class="muted">(старый реестр)</span>
+                {% else %}-{% endif %}
+            </dd>
+        </dl>
+    </div>
+
+    <aside class="panel">
+        <h2>Файл входящего письма</h2>
+        <div class="correspondence-file-card {% if not record.incoming_file %}is-missing{% endif %}">
+            <div>
+                <strong>Входящее письмо</strong>
+                <p>{% if record.incoming_file %}{{ record.incoming_original_name }}{% else %}Файл пока не прикреплен{% endif %}</p>
+            </div>
+            {% if record.incoming_file %}<a class="button" href="{% url 'documents:correspondence_file_download' record.pk 'incoming' %}">Скачать</a>{% endif %}
+        </div>
+
+        {% if can_update %}
+            <form class="signed-upload-form" method="post" enctype="multipart/form-data" action="{% url 'documents:incoming_correspondence_file_upload' record.pk %}">
+                {% csrf_token %}
+                <label for="{{ incoming_file_form.incoming_file.id_for_label }}">{% if record.incoming_file %}Заменить файл{% else %}Прикрепить файл{% endif %}</label>
+                {{ incoming_file_form.incoming_file }}
+                <button class="button primary" type="submit">Сохранить файл</button>
+            </form>
+        {% endif %}
+    </aside>
+</section>
+{% endblock %}

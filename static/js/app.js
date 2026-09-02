@@ -71,4 +71,231 @@ document.addEventListener("DOMContentLoaded", function () {
             setSidebarOpen(false, true);
         }
     });
+
+    let openSearchableSelect = null;
+
+    document.querySelectorAll("select[data-searchable-select]").forEach(function (select) {
+        const wrapper = document.createElement("div");
+        wrapper.className = "searchable-select";
+        select.parentNode.insertBefore(wrapper, select);
+        wrapper.appendChild(select);
+        select.classList.add("searchable-select-native");
+
+        const toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.className = "searchable-select-toggle";
+        toggle.id = `${select.id}-control`;
+        toggle.setAttribute("aria-haspopup", "listbox");
+        toggle.setAttribute("aria-expanded", "false");
+        wrapper.appendChild(toggle);
+
+        const dropdown = document.createElement("div");
+        dropdown.className = "searchable-select-dropdown";
+        dropdown.hidden = true;
+        wrapper.appendChild(dropdown);
+
+        const search = document.createElement("input");
+        search.type = "search";
+        search.className = "searchable-select-search";
+        search.placeholder = select.dataset.searchPlaceholder || "Поиск по списку";
+        search.autocomplete = "off";
+        search.setAttribute("aria-label", search.placeholder);
+        dropdown.appendChild(search);
+
+        const optionList = document.createElement("div");
+        optionList.className = "searchable-select-options";
+        optionList.setAttribute("role", "listbox");
+        dropdown.appendChild(optionList);
+
+        const label = document.querySelector(`label[for="${select.id}"]`);
+        if (label) label.htmlFor = toggle.id;
+
+        function selectedText() {
+            return select.options[select.selectedIndex]?.text || "Выберите значение";
+        }
+
+        function updateToggle() {
+            toggle.textContent = selectedText();
+            toggle.classList.toggle("is-placeholder", !select.value);
+        }
+
+        function closeDropdown(restoreFocus = false) {
+            dropdown.hidden = true;
+            wrapper.classList.remove("is-open");
+            toggle.setAttribute("aria-expanded", "false");
+            if (openSearchableSelect === wrapper) openSearchableSelect = null;
+            if (restoreFocus) toggle.focus();
+        }
+
+        function renderOptions() {
+            const query = search.value.trim().toLocaleLowerCase("ru");
+            optionList.replaceChildren();
+            let visibleCount = 0;
+
+            Array.from(select.options).forEach(function (option) {
+                if (option.disabled) return;
+                if (query && !option.text.toLocaleLowerCase("ru").includes(query)) return;
+                visibleCount += 1;
+                const optionButton = document.createElement("button");
+                optionButton.type = "button";
+                optionButton.className = "searchable-select-option";
+                optionButton.textContent = option.text;
+                optionButton.dataset.value = option.value;
+                optionButton.setAttribute("role", "option");
+                optionButton.setAttribute("aria-selected", String(option.value === select.value));
+                if (option.value === select.value) optionButton.classList.add("is-selected");
+                optionButton.addEventListener("click", function () {
+                    select.value = option.value;
+                    select.dispatchEvent(new Event("change", { bubbles: true }));
+                    updateToggle();
+                    closeDropdown(true);
+                });
+                optionList.appendChild(optionButton);
+            });
+
+            if (!visibleCount) {
+                const empty = document.createElement("div");
+                empty.className = "searchable-select-empty";
+                empty.textContent = "Ничего не найдено";
+                optionList.appendChild(empty);
+            }
+        }
+
+        function openDropdown() {
+            if (openSearchableSelect && openSearchableSelect !== wrapper) {
+                openSearchableSelect.querySelector(".searchable-select-dropdown").hidden = true;
+                openSearchableSelect.classList.remove("is-open");
+                openSearchableSelect.querySelector(".searchable-select-toggle").setAttribute("aria-expanded", "false");
+            }
+            openSearchableSelect = wrapper;
+            wrapper.classList.add("is-open");
+            dropdown.hidden = false;
+            toggle.setAttribute("aria-expanded", "true");
+            search.value = "";
+            renderOptions();
+            search.focus();
+        }
+
+        toggle.addEventListener("click", function () {
+            if (wrapper.classList.contains("is-open")) closeDropdown();
+            else openDropdown();
+        });
+        search.addEventListener("input", renderOptions);
+        select.addEventListener("change", updateToggle);
+        select.addEventListener("invalid", function () {
+            wrapper.classList.add("has-error");
+            toggle.focus();
+        });
+        wrapper.addEventListener("keydown", function (event) {
+            if (event.key === "Escape") {
+                event.stopPropagation();
+                closeDropdown(true);
+            }
+        });
+
+        updateToggle();
+    });
+
+    document.addEventListener("click", function (event) {
+        if (openSearchableSelect && !openSearchableSelect.contains(event.target)) {
+            const dropdown = openSearchableSelect.querySelector(".searchable-select-dropdown");
+            const toggle = openSearchableSelect.querySelector(".searchable-select-toggle");
+            dropdown.hidden = true;
+            openSearchableSelect.classList.remove("is-open");
+            toggle.setAttribute("aria-expanded", "false");
+            openSearchableSelect = null;
+        }
+    });
+
+    document.querySelectorAll("[data-numbered-correspondence-form]").forEach(function (numberedForm) {
+        const departmentSelect = numberedForm.querySelector("#id_department");
+        const numberPreview = numberedForm.querySelector("[data-number-preview]");
+
+        function updateNumberPreview() {
+            if (!numberPreview) return;
+            const selectedOption = departmentSelect?.options[departmentSelect.selectedIndex];
+            const departmentCode = selectedOption?.text.match(/^(\d{2})\s+-/)?.[1] || "__";
+            numberPreview.textContent = [
+                numberPreview.dataset.kindCode,
+                departmentCode,
+                numberPreview.dataset.sequence,
+            ].join("-");
+        }
+
+        departmentSelect?.addEventListener("change", updateNumberPreview);
+        updateNumberPreview();
+    });
+
+    const outgoingForm = document.querySelector("[data-outgoing-form]");
+    if (outgoingForm) {
+        const departmentSelect = outgoingForm.querySelector("#id_department");
+        const downloadButton = outgoingForm.querySelector("[data-template-download]");
+        const downloadStatus = outgoingForm.querySelector("[data-template-status]");
+
+        downloadButton?.addEventListener("click", async function () {
+            const currentFormData = new FormData(outgoingForm);
+            const subjectInput = outgoingForm.elements.namedItem("subject");
+            const addresseeInput = outgoingForm.elements.namedItem("addressee");
+            const addresseePersonInput = outgoingForm.elements.namedItem("addressee_person");
+            const subject = String(currentFormData.get("subject") || "").trim();
+            const addressee = String(currentFormData.get("addressee") || "").trim();
+            const addresseePerson = String(currentFormData.get("addressee_person") || "").trim();
+
+            if (!departmentSelect?.value) {
+                departmentSelect?.focus();
+                if (downloadStatus) downloadStatus.textContent = "Сначала выберите подразделение.";
+                return;
+            }
+            if (!subject) {
+                subjectInput?.focus();
+                if (downloadStatus) downloadStatus.textContent = "Сначала заполните поле «Наименование».";
+                return;
+            }
+            if (!addressee) {
+                addresseeInput?.focus();
+                if (downloadStatus) downloadStatus.textContent = "Сначала заполните поле «Адресат».";
+                return;
+            }
+            if (!addresseePerson) {
+                addresseePersonInput?.focus();
+                if (downloadStatus) downloadStatus.textContent = "Сначала заполните поле «Кому».";
+                return;
+            }
+
+            downloadButton.disabled = true;
+            if (downloadStatus) downloadStatus.textContent = "Формируем бланк...";
+            const payload = new FormData();
+            payload.append("department", departmentSelect.value);
+            payload.append("subject", subject);
+            payload.append("addressee", addressee);
+            payload.append("addressee_person", addresseePerson);
+            payload.append("csrfmiddlewaretoken", outgoingForm.querySelector("[name=csrfmiddlewaretoken]").value);
+
+            try {
+                const response = await fetch(downloadButton.dataset.url, { method: "POST", body: payload });
+                if (!response.ok) {
+                    const error = await response.json().catch(function () { return {}; });
+                    throw new Error(error.error || "Не удалось сформировать бланк.");
+                }
+                const blob = await response.blob();
+                const disposition = response.headers.get("Content-Disposition") || "";
+                const utfName = disposition.match(/filename\*=utf-8''([^;]+)/i);
+                const plainName = disposition.match(/filename="?([^";]+)"?/i);
+                const fileName = utfName ? decodeURIComponent(utfName[1]) : (plainName ? plainName[1] : "Исходящее письмо.docx");
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = fileName;
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                URL.revokeObjectURL(url);
+                if (downloadStatus) downloadStatus.textContent = "Бланк скачан и прикреплен в черновики.";
+            } catch (error) {
+                if (downloadStatus) downloadStatus.textContent = error.message;
+            } finally {
+                downloadButton.disabled = false;
+            }
+        });
+    }
 });

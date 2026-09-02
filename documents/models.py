@@ -63,6 +63,210 @@ class UserProfile(TimeStampedModel):
         return user_full_name(self.user)
 
 
+class CorrespondenceDepartment(TimeStampedModel):
+    name = models.CharField("Наименование", max_length=150, unique=True)
+    code = models.CharField("Код в регистрационном номере", max_length=2, unique=True)
+    is_active = models.BooleanField("Активно", default=True)
+
+    class Meta:
+        verbose_name = "Подразделение корреспонденции"
+        verbose_name_plural = "Подразделения корреспонденции"
+        ordering = ["code"]
+
+    def __str__(self):
+        return f"{self.code} - {self.name}"
+
+
+class CorrespondenceSequence(TimeStampedModel):
+    OUTGOING = "outgoing"
+    INCOMING = "incoming"
+    MEMO = "memo"
+    KINDS = [
+        (OUTGOING, "Исходящая корреспонденция"),
+        (INCOMING, "Входящая корреспонденция"),
+        (MEMO, "Служебные записки"),
+    ]
+
+    kind = models.CharField("Вид корреспонденции", max_length=20, choices=KINDS, unique=True)
+    next_number = models.PositiveIntegerField(
+        "Следующий порядковый номер",
+        default=1,
+        help_text="Укажите номер, который система выдаст при следующем резервировании.",
+    )
+
+    class Meta:
+        verbose_name = "Счетчик корреспонденции"
+        verbose_name_plural = "Счетчики корреспонденции"
+        ordering = ["kind"]
+
+    def __str__(self):
+        return f"{self.get_kind_display()}: следующий № {self.next_number}"
+
+    def clean(self):
+        super().clean()
+        if not self.kind:
+            return
+        last_used = (
+            CorrespondenceRecord.objects.filter(kind=self.kind)
+            .aggregate(max_number=Max("sequence_number"))
+            .get("max_number")
+            or 0
+        )
+        if self.next_number <= last_used:
+            raise ValidationError(
+                f"Следующий номер должен быть больше уже зарезервированного № {last_used}."
+            )
+
+
+def correspondence_upload_path(instance, filename):
+    ext = Path(filename).suffix.lower()
+    year = timezone.localdate().year
+    return f"correspondence/{instance.kind}/{year}/{instance.id}/{uuid4().hex}{ext}"
+
+
+class CorrespondenceRecord(TimeStampedModel):
+    OUTGOING = CorrespondenceSequence.OUTGOING
+    INCOMING = CorrespondenceSequence.INCOMING
+    MEMO = CorrespondenceSequence.MEMO
+    KINDS = CorrespondenceSequence.KINDS
+    KIND_CODES = {
+        OUTGOING: "01",
+        INCOMING: "02",
+        MEMO: "03",
+    }
+
+    RESERVED = "reserved"
+    REGISTERED = "registered"
+    CANCELED = "canceled"
+    STATUSES = [
+        (RESERVED, "Номер зарезервирован"),
+        (REGISTERED, "Зарегистрировано"),
+        (CANCELED, "Отменено"),
+    ]
+
+    kind = models.CharField("Вид корреспонденции", max_length=20, choices=KINDS)
+    status = models.CharField("Статус", max_length=20, choices=STATUSES, default=RESERVED)
+    sequence_number = models.PositiveIntegerField("Порядковый номер")
+    registration_number = models.CharField(
+        "Регистрационный номер",
+        max_length=40,
+        blank=True,
+        db_index=True,
+    )
+    department = models.ForeignKey(
+        CorrespondenceDepartment,
+        verbose_name="Подразделение",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="correspondence_records",
+    )
+    reply_to = models.ForeignKey(
+        "self",
+        verbose_name="Ответ на входящее письмо",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="outgoing_replies",
+        limit_choices_to={"kind": INCOMING, "status": REGISTERED},
+    )
+    related_outgoing = models.ForeignKey(
+        "self",
+        verbose_name="Связанное исходящее письмо",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="linked_incoming_records",
+        limit_choices_to={"kind": OUTGOING, "status": REGISTERED},
+    )
+    related_document_number = models.CharField(
+        "Номер связанного документа из старого реестра",
+        max_length=100,
+        blank=True,
+    )
+    addressee = models.CharField("Адресат", max_length=250, blank=True)
+    addressee_person = models.CharField("Кому", max_length=250, blank=True)
+    sender = models.CharField("Отправитель", max_length=250, blank=True)
+    subject = models.CharField("Наименование", max_length=300, blank=True)
+    resolution = models.TextField("Резолюция", blank=True)
+    registration_date = models.DateField("Дата", default=timezone.localdate)
+    executor = models.ForeignKey(
+        User,
+        verbose_name="Исполнитель",
+        on_delete=models.PROTECT,
+        related_name="executed_correspondence",
+    )
+    created_by = models.ForeignKey(
+        User,
+        verbose_name="Кто зарегистрировал",
+        on_delete=models.PROTECT,
+        related_name="registered_correspondence",
+    )
+    reserved_at = models.DateTimeField("Номер зарезервирован", default=timezone.now)
+    registered_at = models.DateTimeField("Зарегистрировано", null=True, blank=True)
+    template_generated_at = models.DateTimeField("Бланк сформирован", null=True, blank=True)
+    draft_file = models.FileField(
+        "Черновик",
+        upload_to=correspondence_upload_path,
+        blank=True,
+    )
+    draft_original_name = models.CharField("Имя файла черновика", max_length=255, blank=True)
+    signed_file = models.FileField(
+        "Подписанный документ",
+        upload_to=correspondence_upload_path,
+        blank=True,
+    )
+    signed_original_name = models.CharField("Имя подписанного файла", max_length=255, blank=True)
+    incoming_file = models.FileField(
+        "Входящее письмо",
+        upload_to=correspondence_upload_path,
+        blank=True,
+    )
+    incoming_original_name = models.CharField("Имя файла входящего письма", max_length=255, blank=True)
+
+    class Meta:
+        verbose_name = "Запись корреспонденции"
+        verbose_name_plural = "Реестр корреспонденции"
+        ordering = ["-registration_date", "-sequence_number"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["kind", "sequence_number"],
+                name="unique_correspondence_kind_sequence",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.registration_number or self.reserved_number} - {self.subject or 'Без наименования'}"
+
+    @property
+    def kind_code(self):
+        return self.KIND_CODES[self.kind]
+
+    @property
+    def reserved_number(self):
+        department_code = self.department.code if self.department_id else "__"
+        return f"{self.kind_code}-{department_code}-{self.sequence_number}"
+
+    def build_registration_number(self, department=None):
+        selected_department = department or self.department
+        if not selected_department:
+            return self.reserved_number
+        return f"{self.kind_code}-{selected_department.code}-{self.sequence_number}"
+
+    @property
+    def has_signed_document(self):
+        return bool(self.signed_file)
+
+    def clean(self):
+        super().clean()
+        for field_name in ("draft_file", "signed_file", "incoming_file"):
+            uploaded_file = getattr(self, field_name, None)
+            if uploaded_file and uploaded_file.size > settings.MAX_UPLOAD_SIZE:
+                raise ValidationError(
+                    {field_name: f"Размер файла больше {settings.MAX_UPLOAD_SIZE // 1024 // 1024} МБ."}
+                )
+
+
 class DocumentType(TimeStampedModel):
     name = models.CharField("Наименование", max_length=150, unique=True)
     code = models.CharField("Код для номера", max_length=12, unique=True)
@@ -270,6 +474,12 @@ class Document(TimeStampedModel):
         null=True,
         blank=True,
     )
+    approval_route_type = models.CharField(
+        "Тип маршрута согласования",
+        max_length=20,
+        choices=ApprovalRoute.ROUTE_TYPES,
+        default=ApprovalRoute.SEQUENTIAL,
+    )
     version = models.PositiveIntegerField("Версия", default=1)
     revision_requested_by = models.ForeignKey(
         User,
@@ -415,6 +625,7 @@ class ApprovalTask(TimeStampedModel):
         blank=True,
     )
     approver = models.ForeignKey(User, verbose_name="Согласующий", on_delete=models.PROTECT, related_name="approval_tasks")
+    document_version = models.PositiveIntegerField("Версия документа", default=1)
     status = models.CharField("Статус", max_length=20, choices=STATUSES, default=PENDING)
     due_date = models.DateField("Срок", null=True, blank=True)
     reminder_sent_at = models.DateTimeField("Напоминание отправлено", null=True, blank=True)
@@ -441,6 +652,56 @@ class ApprovalTask(TimeStampedModel):
     @property
     def is_overdue(self):
         return self.status == self.PENDING and self.due_date and self.due_date < timezone.localdate()
+
+
+class RevisionRequest(TimeStampedModel):
+    OPEN = "open"
+    RESOLVED = "resolved"
+    STATUSES = [
+        (OPEN, "Требует исправления"),
+        (RESOLVED, "Исправлено"),
+    ]
+
+    document = models.ForeignKey(
+        Document,
+        verbose_name="Документ",
+        on_delete=models.CASCADE,
+        related_name="revision_requests",
+    )
+    approval_task = models.OneToOneField(
+        ApprovalTask,
+        verbose_name="Задача согласования",
+        on_delete=models.CASCADE,
+        related_name="revision_request",
+    )
+    requested_by = models.ForeignKey(
+        User,
+        verbose_name="Кто вернул на доработку",
+        on_delete=models.PROTECT,
+        related_name="document_revision_requests",
+    )
+    document_version = models.PositiveIntegerField("Версия с замечанием", default=1)
+    comment = models.TextField("Замечание")
+    status = models.CharField("Статус", max_length=20, choices=STATUSES, default=OPEN)
+    resolution_comment = models.TextField("Внесенные корректировки", blank=True)
+    resolved_by = models.ForeignKey(
+        User,
+        verbose_name="Кто внес корректировки",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="resolved_document_revision_requests",
+    )
+    resolved_at = models.DateTimeField("Дата исправления", null=True, blank=True)
+    resolved_in_version = models.PositiveIntegerField("Исправлено в версии", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Замечание по документу"
+        verbose_name_plural = "Замечания по документам"
+        ordering = ["created_at", "id"]
+
+    def __str__(self):
+        return f"{self.document.system_number}: {self.requested_by}"
 
 
 class DocumentComment(TimeStampedModel):

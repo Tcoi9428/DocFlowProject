@@ -5,6 +5,7 @@
             <tr>
                 <th>Документ</th>
                 <th>Текущий этап</th>
+                <th>Версия</th>
                 <th>Ответственный</th>
                 <th>Срок</th>
                 <th>Статус</th>
@@ -14,7 +15,8 @@
             {% for task in tasks %}
                 <tr>
                     <td data-label="Документ"><a href="{% url 'documents:detail' task.document.pk %}">{{ task.document.system_number }}</a><br>{{ task.document.title }}</td>
-                    <td data-label="Текущий этап">{% if task.step %}{{ task.step.name }}{% else %}-{% endif %}</td>
+                    <td data-label="Текущий этап">{% if task.configured_approver %}{{ task.configured_approver.name }}{% elif task.step %}{{ task.step.name }}{% else %}-{% endif %}</td>
+                    <td data-label="Версия">{{ task.document_version }}</td>
                     <td data-label="Ответственный">{% include "documents/partials/user_display.html" with person=task.approver %}</td>
                     <td data-label="Срок" class="{% if task.is_overdue %}danger-text{% endif %}">{{ task.due_date|date:"d.m.Y"|default:"-" }}</td>
                     <td data-label="Статус">
@@ -24,7 +26,7 @@
                     </td>
                 </tr>
             {% empty %}
-                <tr><td colspan="5" class="empty">Нет задач</td></tr>
+                <tr><td colspan="6" class="empty">Нет задач</td></tr>
             {% endfor %}
         </tbody>
     </table>

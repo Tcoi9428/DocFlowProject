@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% load user_display %}
+
+{% block title %}Регистрация входящего письма | DocFlow{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <h1>Регистрация входящего письма</h1>
+        <p>Порядковый номер уже зарезервирован за вами и не будет выдан другому пользователю.</p>
+    </div>
+    <a class="button" href="{% url 'documents:correspondence_section' 'incoming' %}">К реестру</a>
+</section>
+
+<form method="post" enctype="multipart/form-data" class="correspondence-create-layout equal" data-numbered-correspondence-form>
+    {% csrf_token %}
+    <input type="hidden" name="reservation_id" value="{{ record.pk }}">
+
+    <section class="panel form-card correspondence-form-panel">
+        <div class="form-card-header">
+            <h2>Регистрационные данные</h2>
+            <p>Основные реквизиты входящего письма.</p>
+        </div>
+        {% if form.non_field_errors %}<div class="form-errors">{{ form.non_field_errors }}</div>{% endif %}
+        <div class="inline-form-list">
+            <div class="inline-field number-field">
+                <label>Номер документа</label>
+                <div>
+                    <strong class="reserved-number" data-number-preview data-kind-code="02" data-sequence="{{ record.sequence_number }}">{{ record.reserved_number }}</strong>
+                    <small>Порядковая часть {{ record.sequence_number }} зарезервирована {{ record.reserved_at|date:"d.m.Y H:i" }}.</small>
+                </div>
+            </div>
+            {% for field in form %}
+                {% if field.name == "department" or field.name == "subject" or field.name == "sender" or field.name == "registration_date" or field.name == "resolution" %}
+                    <div class="inline-field">
+                        <label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %}<span class="required-mark">*</span>{% endif %}</label>
+                        <div>
+                            {{ field }}
+                            {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
+                            {% for error in field.errors %}<span class="field-error">{{ error }}</span>{% endfor %}
+                        </div>
+                    </div>
+                {% endif %}
+            {% endfor %}
+            <div class="inline-field">
+                <label>Регистратор</label>
+                <div>{% include "documents/partials/user_display.html" with person=request.user %}</div>
+            </div>
+        </div>
+    </section>
+
+    <aside class="panel form-card correspondence-files-panel">
+        <div class="form-card-header">
+            <h2>Связь и файл</h2>
+            <p>Выберите письмо из системы либо укажите номер старого реестра.</p>
+        </div>
+        <div class="inline-form-list">
+            <div class="inline-field">
+                <label for="{{ form.related_outgoing.id_for_label }}">{{ form.related_outgoing.label }}</label>
+                <div>
+                    {{ form.related_outgoing }}
+                    {% for error in form.related_outgoing.errors %}<span class="field-error">{{ error }}</span>{% endfor %}
+                </div>
+            </div>
+            <div class="inline-field">
+                <label for="{{ form.related_document_number.id_for_label }}">Номер из старого реестра</label>
+                <div>
+                    {{ form.related_document_number }}
+                    <small>Заполняйте только тогда, когда связанного письма еще нет в DocFlow.</small>
+                    {% for error in form.related_document_number.errors %}<span class="field-error">{{ error }}</span>{% endfor %}
+                </div>
+            </div>
+            <div class="inline-field">
+                <label for="{{ form.incoming_file.id_for_label }}">{{ form.incoming_file.label }}</label>
+                <div>
+                    {{ form.incoming_file }}
+                    {% if form.incoming_file.help_text %}<small>{{ form.incoming_file.help_text }}</small>{% endif %}
+                    {% for error in form.incoming_file.errors %}<span class="field-error">{{ error }}</span>{% endfor %}
+                </div>
+            </div>
+        </div>
+        <div class="correspondence-form-actions">
+            <button type="submit" class="button primary">Зарегистрировать письмо</button>
+            <a class="button" href="{% url 'documents:correspondence_section' 'incoming' %}">Отмена</a>
+        </div>
+    </aside>
+</form>
+{% endblock %}

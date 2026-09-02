@@ -30,3 +30,7 @@ Thumbs.db
 .coverage
 htmlcov/
 .pytest_cache/
+
+# Local exports and generated verification artifacts
+docflow-data.json
+outputs/

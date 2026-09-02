@@ -70,6 +70,13 @@
             </div>
 
             <div class="inline-field approval-template-field">{{ form.route.label_tag }}<div>{{ form.route }}{{ form.route.errors }}</div></div>
+            <div class="inline-field route-type-field">
+                {{ form.approval_route_type.label_tag }}
+                <div class="route-type-control">
+                    {{ form.approval_route_type }}
+                    {{ form.approval_route_type.errors }}
+                </div>
+            </div>
 
             <div class="approval-builder-toolbar">
                 <button type="button" id="add-approver-button">+ Добавить согласующего</button>
@@ -137,6 +144,7 @@
 
     const routeTemplates = {{ route_templates_json|safe }};
     const routeField = document.querySelector("#id_route");
+    const routeTypeFields = document.querySelectorAll("[name='approval_route_type']");
     const approverList = document.querySelector("#approver-list");
     const approverTemplate = document.querySelector("#approver-row-template");
     const addApproverButton = document.querySelector("#add-approver-button");
@@ -174,7 +182,13 @@
 
     if (routeField) {
         routeField.addEventListener("change", () => {
-            const rows = routeTemplates[routeField.value] || [];
+            const selectedTemplate = routeTemplates[routeField.value] || {};
+            const rows = selectedTemplate.steps || [];
+            if (selectedTemplate.route_type) {
+                routeTypeFields.forEach((field) => {
+                    field.checked = field.value === selectedTemplate.route_type;
+                });
+            }
             if (!rows.length || !approverList) return;
             approverList.innerHTML = "";
             rows.forEach((row) => addApproverRow(row));

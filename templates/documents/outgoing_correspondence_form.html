@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block title %}Регистрация исходящего письма | DocFlow{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <h1>Регистрация исходящего письма</h1>
+        <p>Порядковый номер уже зарезервирован за вами и не будет выдан другому пользователю.</p>
+    </div>
+    <a class="button" href="{% url 'documents:correspondence_section' 'outgoing' %}">К реестру</a>
+</section>
+
+<form method="post" enctype="multipart/form-data" class="correspondence-create-layout" data-outgoing-form data-numbered-correspondence-form>
+    {% csrf_token %}
+    <input type="hidden" name="reservation_id" value="{{ record.pk }}">
+
+    <section class="panel form-card correspondence-form-panel">
+        <div class="form-card-header">
+            <h2>Реквизиты письма</h2>
+            <p>Заполните данные, которые будут использоваться в реестре.</p>
+        </div>
+
+        {% if form.non_field_errors %}<div class="form-errors">{{ form.non_field_errors }}</div>{% endif %}
+        <div class="inline-form-list">
+            <div class="inline-field number-field">
+                <label>Номер</label>
+                <div>
+                    <strong class="reserved-number" data-number-preview data-kind-code="01" data-sequence="{{ record.sequence_number }}">{{ record.reserved_number }}</strong>
+                    <small>Порядковая часть {{ record.sequence_number }} зарезервирована {{ record.reserved_at|date:"d.m.Y H:i" }}.</small>
+                </div>
+            </div>
+            {% for field in form %}
+                <div class="inline-field {% if field.name == 'signed_file' %}signed-file-field{% endif %}">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %}<span class="required-mark">*</span>{% endif %}</label>
+                    <div>
+                        {{ field }}
+                        {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
+                        {% for error in field.errors %}<span class="field-error">{{ error }}</span>{% endfor %}
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    </section>
+
+    <aside class="panel form-card correspondence-files-panel">
+        <div class="form-card-header">
+            <h2>Файлы письма</h2>
+            <p>Сформируйте утвержденный бланк с уже присвоенным номером.</p>
+        </div>
+        <div class="correspondence-file-steps">
+            <div class="file-step">
+                <span class="step-number">1</span>
+                <div>
+                    <h3>Выберите подразделение</h3>
+                    <p>Код подразделения станет средней частью номера: например, <strong>01-02-{{ record.sequence_number }}</strong>.</p>
+                </div>
+            </div>
+            <div class="file-step">
+                <span class="step-number">2</span>
+                <div>
+                    <h3>Скачайте бланк</h3>
+                    <p>Система подставит номер в ячейку рядом с «№», перенесет наименование в строку «О» и автоматически сохранит файл в черновики.</p>
+                    <button
+                        type="button"
+                        class="button outline template-download-button"
+                        data-template-download
+                        data-url="{% url 'documents:outgoing_template_download' record.pk %}"
+                    >Скачать бланк исходящего письма</button>
+                    <span class="template-download-status" data-template-status>
+                        {% if record.draft_file %}Бланк уже прикреплен: {{ record.draft_original_name }}{% endif %}
+                    </span>
+                </div>
+            </div>
+            <div class="file-step">
+                <span class="step-number">3</span>
+                <div>
+                    <h3>Подписанный документ</h3>
+                    <p>Его можно прикрепить в поле слева сейчас либо позднее в карточке зарегистрированного письма.</p>
+                </div>
+            </div>
+        </div>
+        <div class="correspondence-form-actions">
+            <button type="submit" class="button primary">Зарегистрировать письмо</button>
+            <a class="button" href="{% url 'documents:correspondence_section' 'outgoing' %}">Отмена</a>
+        </div>
+    </aside>
+</form>
+{% endblock %}

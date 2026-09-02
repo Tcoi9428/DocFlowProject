@@ -1,4 +1,5 @@
 from django import forms
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
@@ -9,6 +10,8 @@ from .models import (
     ApprovalTask,
     Attachment,
     ContractKind,
+    CorrespondenceDepartment,
+    CorrespondenceRecord,
     CustomFieldDefinition,
     Document,
     DocumentComment,
@@ -21,6 +24,190 @@ from .models import (
 class UserModelChoiceField(forms.ModelChoiceField):
     def label_from_instance(self, obj):
         return user_identity(obj)
+
+
+class OutgoingCorrespondenceForm(forms.ModelForm):
+    executor = UserModelChoiceField(
+        label="Исполнитель",
+        queryset=User.objects.none(),
+    )
+
+    class Meta:
+        model = CorrespondenceRecord
+        fields = [
+            "department",
+            "reply_to",
+            "related_document_number",
+            "addressee",
+            "addressee_person",
+            "subject",
+            "registration_date",
+            "executor",
+            "signed_file",
+        ]
+        widgets = {
+            "registration_date": forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}),
+            "addressee": forms.TextInput(attrs={"placeholder": "Наименование организации"}),
+            "addressee_person": forms.TextInput(attrs={"placeholder": "ФИО и должность получателя"}),
+            "subject": forms.TextInput(attrs={"placeholder": "Например: О согласовании поставки запасных частей"}),
+            "signed_file": forms.ClearableFileInput(attrs={"accept": ".pdf,.doc,.docx,.jpg,.jpeg,.png"}),
+            "related_document_number": forms.TextInput(
+                attrs={"placeholder": "Укажите номер, если письма еще нет в системе"}
+            ),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["department"].queryset = CorrespondenceDepartment.objects.filter(is_active=True)
+        self.fields["reply_to"].queryset = CorrespondenceRecord.objects.filter(
+            kind=CorrespondenceRecord.INCOMING,
+            status=CorrespondenceRecord.REGISTERED,
+        ).order_by("-registration_date", "-sequence_number")
+        self.fields["reply_to"].required = False
+        self.fields["reply_to"].label = "Связанное входящее письмо"
+        self.fields["reply_to"].empty_label = "Не выбрано"
+        self.fields["reply_to"].widget.attrs.update(
+            {
+                "data-searchable-select": "true",
+                "data-search-placeholder": "Поиск по номеру или наименованию",
+            }
+        )
+        self.fields["related_document_number"].required = False
+        self.fields["executor"].queryset = (
+            User.objects.filter(is_active=True)
+            .select_related("userprofile")
+            .order_by("last_name", "first_name", "username")
+        )
+        self.fields["executor"].widget.attrs.update(
+            {
+                "data-searchable-select": "true",
+                "data-search-placeholder": "Поиск по ФИО или должности",
+            }
+        )
+        self.fields["signed_file"].required = False
+        self.fields["registration_date"].input_formats = ["%Y-%m-%d"]
+        max_size_mb = settings.MAX_UPLOAD_SIZE // 1024 // 1024
+        self.fields["signed_file"].help_text = f"Можно прикрепить позднее. Максимальный размер файла — {max_size_mb} МБ."
+
+    def clean_signed_file(self):
+        uploaded_file = self.cleaned_data.get("signed_file")
+        if uploaded_file and uploaded_file.size > settings.MAX_UPLOAD_SIZE:
+            max_size_mb = settings.MAX_UPLOAD_SIZE // 1024 // 1024
+            raise ValidationError(f"Размер файла больше {max_size_mb} МБ.")
+        return uploaded_file
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if cleaned_data.get("reply_to"):
+            cleaned_data["related_document_number"] = ""
+        return cleaned_data
+
+
+class IncomingCorrespondenceForm(forms.ModelForm):
+    class Meta:
+        model = CorrespondenceRecord
+        fields = [
+            "department",
+            "subject",
+            "sender",
+            "related_outgoing",
+            "related_document_number",
+            "registration_date",
+            "resolution",
+            "incoming_file",
+        ]
+        widgets = {
+            "subject": forms.Textarea(
+                attrs={"rows": 3, "placeholder": "Введите наименование входящего письма"}
+            ),
+            "sender": forms.TextInput(attrs={"placeholder": "Организация или ФИО отправителя"}),
+            "related_document_number": forms.TextInput(
+                attrs={"placeholder": "Номер из старого реестра, если письма нет в системе"}
+            ),
+            "registration_date": forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}),
+            "resolution": forms.Textarea(attrs={"rows": 4, "placeholder": "Текст резолюции"}),
+            "incoming_file": forms.ClearableFileInput(
+                attrs={"accept": ".pdf,.doc,.docx,.jpg,.jpeg,.png"}
+            ),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["department"].queryset = CorrespondenceDepartment.objects.filter(is_active=True)
+        self.fields["department"].required = True
+        self.fields["subject"].required = True
+        self.fields["sender"].required = True
+        self.fields["related_outgoing"].queryset = CorrespondenceRecord.objects.filter(
+            kind=CorrespondenceRecord.OUTGOING,
+            status=CorrespondenceRecord.REGISTERED,
+        ).order_by("-registration_date", "-sequence_number")
+        self.fields["related_outgoing"].required = False
+        self.fields["related_outgoing"].empty_label = "Не выбрано"
+        self.fields["related_outgoing"].widget.attrs.update(
+            {
+                "data-searchable-select": "true",
+                "data-search-placeholder": "Поиск по номеру или наименованию",
+            }
+        )
+        self.fields["related_document_number"].required = False
+        self.fields["resolution"].required = False
+        self.fields["incoming_file"].required = False
+        self.fields["registration_date"].input_formats = ["%Y-%m-%d"]
+        max_size_mb = settings.MAX_UPLOAD_SIZE // 1024 // 1024
+        self.fields["incoming_file"].help_text = (
+            f"Поле необязательное. Максимальный размер файла — {max_size_mb} МБ."
+        )
+
+    def clean_incoming_file(self):
+        uploaded_file = self.cleaned_data.get("incoming_file")
+        if uploaded_file and uploaded_file.size > settings.MAX_UPLOAD_SIZE:
+            max_size_mb = settings.MAX_UPLOAD_SIZE // 1024 // 1024
+            raise ValidationError(f"Размер файла больше {max_size_mb} МБ.")
+        return uploaded_file
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if cleaned_data.get("related_outgoing"):
+            cleaned_data["related_document_number"] = ""
+        return cleaned_data
+
+
+class IncomingCorrespondenceFileForm(forms.ModelForm):
+    class Meta:
+        model = CorrespondenceRecord
+        fields = ["incoming_file"]
+        widgets = {
+            "incoming_file": forms.ClearableFileInput(
+                attrs={"accept": ".pdf,.doc,.docx,.jpg,.jpeg,.png"}
+            ),
+        }
+
+    def clean_incoming_file(self):
+        uploaded_file = self.cleaned_data.get("incoming_file")
+        if not uploaded_file:
+            raise ValidationError("Выберите файл входящего письма.")
+        if uploaded_file.size > settings.MAX_UPLOAD_SIZE:
+            max_size_mb = settings.MAX_UPLOAD_SIZE // 1024 // 1024
+            raise ValidationError(f"Размер файла больше {max_size_mb} МБ.")
+        return uploaded_file
+
+
+class SignedCorrespondenceFileForm(forms.ModelForm):
+    class Meta:
+        model = CorrespondenceRecord
+        fields = ["signed_file"]
+        widgets = {
+            "signed_file": forms.ClearableFileInput(attrs={"accept": ".pdf,.doc,.docx,.jpg,.jpeg,.png"}),
+        }
+
+    def clean_signed_file(self):
+        uploaded_file = self.cleaned_data.get("signed_file")
+        if not uploaded_file:
+            raise ValidationError("Выберите подписанный документ.")
+        if uploaded_file.size > settings.MAX_UPLOAD_SIZE:
+            max_size_mb = settings.MAX_UPLOAD_SIZE // 1024 // 1024
+            raise ValidationError(f"Размер файла больше {max_size_mb} МБ.")
+        return uploaded_file
 
 
 class DocumentForm(forms.ModelForm):
@@ -40,6 +227,7 @@ class DocumentForm(forms.ModelForm):
             "responsible",
             "department",
             "route",
+            "approval_route_type",
             "registration_date",
             "due_date",
             "amount",
@@ -50,6 +238,7 @@ class DocumentForm(forms.ModelForm):
             "registration_date": forms.DateInput(attrs={"type": "date"}),
             "due_date": forms.DateInput(attrs={"type": "date"}),
             "summary": forms.Textarea(attrs={"rows": 4}),
+            "approval_route_type": forms.RadioSelect(),
         }
 
     def __init__(self, *args, **kwargs):
@@ -188,6 +377,28 @@ class RevisionCorrectionForm(forms.Form):
         label="Внесенные корректировки",
         widget=forms.Textarea(attrs={"rows": 4, "placeholder": "Опишите, какие правки внесены перед повторным согласованием"}),
     )
+
+
+class ParallelRevisionCorrectionForm(forms.Form):
+    def __init__(self, *args, revision_requests, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.revision_requests = list(revision_requests)
+        for revision_request in self.revision_requests:
+            self.fields[f"correction_{revision_request.pk}"] = forms.CharField(
+                label="Внесенные корректировки",
+                widget=forms.Textarea(
+                    attrs={
+                        "rows": 3,
+                        "placeholder": "Опишите, что исправлено по этому замечанию",
+                    }
+                ),
+            )
+
+    def corrections_by_request(self):
+        return {
+            revision_request.pk: self.cleaned_data[f"correction_{revision_request.pk}"]
+            for revision_request in self.revision_requests
+        }
 
 
 class ApprovalTaskFilterForm(forms.Form):

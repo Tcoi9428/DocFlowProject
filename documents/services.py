@@ -17,6 +17,7 @@ from .models import (
     DocumentComment,
     EmailDelivery,
     Notification,
+    RevisionRequest,
 )
 from .user_display import user_identity
 
@@ -239,6 +240,12 @@ def notify_status_change(user, document, title, message):
     create_notification(user, document, Notification.STATUS_CHANGED, title, message)
 
 
+def _document_route_type(document):
+    return document.approval_route_type or (
+        document.route.route_type if document.route_id else ApprovalRoute.SEQUENTIAL
+    )
+
+
 @transaction.atomic
 def start_approval(document, user, request=None):
     route = document.route or ApprovalRoute.objects.filter(
@@ -257,12 +264,17 @@ def start_approval(document, user, request=None):
     document.approval_tasks.all().delete()
 
     if configured_approvers:
-        active_approvers = configured_approvers if route and route.route_type == ApprovalRoute.PARALLEL else [configured_approvers[0]]
+        active_approvers = (
+            configured_approvers
+            if _document_route_type(document) == ApprovalRoute.PARALLEL
+            else [configured_approvers[0]]
+        )
         for item in active_approvers:
             ApprovalTask.objects.create(
                 document=document,
                 configured_approver=item,
                 approver=item.approver,
+                document_version=document.version,
                 due_date=timezone.localdate() + timedelta(days=item.due_days),
             )
             notify_approval_required(item.approver, document)
@@ -273,12 +285,13 @@ def start_approval(document, user, request=None):
     if not steps:
         raise ValueError("В маршруте согласования нет этапов.")
 
-    active_steps = steps if route.route_type == ApprovalRoute.PARALLEL else [steps[0]]
+    active_steps = steps if _document_route_type(document) == ApprovalRoute.PARALLEL else [steps[0]]
     for step in active_steps:
         task = ApprovalTask.objects.create(
             document=document,
             step=step,
             approver=step.approver,
+            document_version=document.version,
             due_date=timezone.localdate() + timedelta(days=step.due_days),
         )
         notify_approval_required(step.approver, document)
@@ -306,6 +319,10 @@ def approve_task(task, user, comment="", request=None):
         f"Документ согласован пользователем {approver_name}.",
     )
 
+    if _document_route_type(document) == ApprovalRoute.PARALLEL:
+        _complete_parallel_cycle(document)
+        return
+
     configured_approver = task.configured_approver
     if configured_approver is None:
         configured_approver = document.configured_approvers.filter(
@@ -313,11 +330,6 @@ def approve_task(task, user, comment="", request=None):
         ).order_by("order").first()
 
     if configured_approver:
-        if route and route.route_type == ApprovalRoute.PARALLEL:
-            if not document.approval_tasks.filter(status=ApprovalTask.PENDING).exists():
-                _finish_document_approval(document)
-            return
-
         next_approver = document.configured_approvers.filter(
             order__gt=configured_approver.order
         ).order_by("order").first()
@@ -326,15 +338,11 @@ def approve_task(task, user, comment="", request=None):
                 document=document,
                 configured_approver=next_approver,
                 approver=next_approver.approver,
+                document_version=document.version,
                 due_date=timezone.localdate() + timedelta(days=next_approver.due_days),
             )
             notify_approval_required(next_approver.approver, document)
         else:
-            _finish_document_approval(document)
-        return
-
-    if route and route.route_type == ApprovalRoute.PARALLEL:
-        if not document.approval_tasks.filter(status=ApprovalTask.PENDING).exists():
             _finish_document_approval(document)
         return
 
@@ -345,6 +353,7 @@ def approve_task(task, user, comment="", request=None):
                 document=document,
                 step=next_step,
                 approver=next_step.approver,
+                document_version=document.version,
                 due_date=timezone.localdate() + timedelta(days=next_step.due_days),
             )
             notify_approval_required(next_step.approver, document)
@@ -358,6 +367,21 @@ def approve_task(task, user, comment="", request=None):
     )
     if not document.approval_tasks.filter(status=ApprovalTask.PENDING).exists():
         _finish_document_approval(document)
+
+
+def _complete_parallel_cycle(document):
+    document = Document.objects.select_for_update().get(pk=document.pk)
+    current_tasks = document.approval_tasks.filter(document_version=document.version)
+    if current_tasks.filter(status=ApprovalTask.PENDING).exists():
+        return
+    if document.revision_requests.filter(
+        document_version=document.version,
+        status=RevisionRequest.OPEN,
+    ).exists():
+        document.status = Document.RETURNED
+        document.save(update_fields=["status", "updated_at"])
+        return
+    _finish_document_approval(document)
 
 
 def _finish_document_approval(document):
@@ -375,8 +399,78 @@ def _finish_document_approval(document):
         )
 
 
+def _record_parallel_revision(task, user, responsible, comment, request, task_status):
+    task.status = task_status
+    task.comment = comment
+    task.completed_at = timezone.now()
+    task.save(update_fields=["status", "comment", "completed_at", "updated_at"])
+
+    document = task.document
+    if responsible:
+        document.responsible = responsible
+    elif not document.responsible_id:
+        document.responsible = document.author
+    document.revision_requested_by = user
+    document.revision_requested_at = timezone.now()
+    document.revision_comment = comment
+    document.save(
+        update_fields=[
+            "responsible",
+            "revision_requested_by",
+            "revision_requested_at",
+            "revision_comment",
+            "updated_at",
+        ]
+    )
+    RevisionRequest.objects.update_or_create(
+        approval_task=task,
+        defaults={
+            "document": document,
+            "requested_by": user,
+            "document_version": task.document_version,
+            "comment": comment,
+            "status": RevisionRequest.OPEN,
+            "resolution_comment": "",
+            "resolved_by": None,
+            "resolved_at": None,
+            "resolved_in_version": None,
+        },
+    )
+    DocumentComment.objects.create(
+        document=document,
+        author=user,
+        text=(
+            f"Замечание к версии {task.document_version}. Документ возвращен на доработку.\n\n"
+            f"Комментарий: {comment or '-'}"
+        ),
+    )
+    action = AuditLog.REJECT if task_status == ApprovalTask.REJECTED else AuditLog.RETURN
+    log_action(user, document, action, f"Замечание к версии {task.document_version}: {comment}".strip(), request)
+    notify_status_change(
+        document.responsible,
+        document,
+        f"Замечание к документу {document.system_number}",
+        (
+            f"Пользователь {user_identity(user)} вернул версию {task.document_version} на доработку. "
+            f"Комментарий: {comment}"
+        ),
+    )
+    _complete_parallel_cycle(document)
+
+
 @transaction.atomic
 def reject_task(task, user, comment="", request=None):
+    if _document_route_type(task.document) == ApprovalRoute.PARALLEL:
+        _record_parallel_revision(
+            task,
+            user,
+            responsible=None,
+            comment=comment,
+            request=request,
+            task_status=ApprovalTask.REJECTED,
+        )
+        return
+
     task.status = ApprovalTask.REJECTED
     task.comment = comment
     task.completed_at = timezone.now()
@@ -395,6 +489,17 @@ def reject_task(task, user, comment="", request=None):
 
 @transaction.atomic
 def return_for_revision(task, user, responsible=None, comment="", request=None):
+    if _document_route_type(task.document) == ApprovalRoute.PARALLEL:
+        _record_parallel_revision(
+            task,
+            user,
+            responsible=responsible,
+            comment=comment,
+            request=request,
+            task_status=ApprovalTask.RETURNED,
+        )
+        return
+
     task.status = ApprovalTask.RETURNED
     task.comment = comment
     task.completed_at = timezone.now()
@@ -440,6 +545,127 @@ def return_for_revision(task, user, responsible=None, comment="", request=None):
 
 
 @transaction.atomic
+def resubmit_parallel_approval(document, user, corrections_by_request, request=None):
+    document.refresh_from_db(fields=["status", "version", "approval_route_type"])
+    if _document_route_type(document) != ApprovalRoute.PARALLEL:
+        raise ValueError("Повторная параллельная отправка доступна только для параллельного маршрута.")
+    if document.status != Document.RETURNED:
+        raise ValueError("Документ еще не готов к повторной отправке.")
+
+    revision_requests = list(
+        document.revision_requests.select_for_update()
+        .select_related(
+            "approval_task",
+            "approval_task__step",
+            "approval_task__configured_approver",
+            "approval_task__approver",
+            "requested_by",
+        )
+        .filter(status=RevisionRequest.OPEN)
+        .order_by("created_at", "id")
+    )
+    if not revision_requests:
+        raise ValueError("Для документа нет открытых замечаний.")
+    if set(corrections_by_request) != {item.pk for item in revision_requests}:
+        raise ValueError("Необходимо описать корректировки по каждому замечанию.")
+
+    participants = {document.author_id: document.author}
+    if document.responsible_id:
+        participants[document.responsible_id] = document.responsible
+    for approval_task in document.approval_tasks.select_related("approver"):
+        participants[approval_task.approver_id] = approval_task.approver
+
+    document.version += 1
+    document.status = Document.ON_APPROVAL
+    document.revision_requested_by = None
+    document.revision_requested_at = None
+    document.revision_comment = ""
+    document.save(
+        update_fields=[
+            "version",
+            "status",
+            "revision_requested_by",
+            "revision_requested_at",
+            "revision_comment",
+            "updated_at",
+        ]
+    )
+
+    correction_lines = []
+    retry_tasks = []
+    for revision_request in revision_requests:
+        correction = corrections_by_request[revision_request.pk].strip()
+        revision_request.status = RevisionRequest.RESOLVED
+        revision_request.resolution_comment = correction
+        revision_request.resolved_by = user
+        revision_request.resolved_at = timezone.now()
+        revision_request.resolved_in_version = document.version
+        revision_request.save(
+            update_fields=[
+                "status",
+                "resolution_comment",
+                "resolved_by",
+                "resolved_at",
+                "resolved_in_version",
+                "updated_at",
+            ]
+        )
+        correction_lines.append(
+            f"Замечание {user_identity(revision_request.requested_by)}: {revision_request.comment}\n"
+            f"Корректировки: {correction}"
+        )
+
+        previous_task = revision_request.approval_task
+        configured_approver = previous_task.configured_approver
+        if configured_approver is None:
+            configured_approver = document.configured_approvers.filter(
+                approver_id=previous_task.approver_id
+            ).order_by("order").first()
+        due_days = 3
+        if configured_approver:
+            due_days = configured_approver.due_days
+        elif previous_task.step_id:
+            due_days = previous_task.step.due_days
+        retry_tasks.append(
+            ApprovalTask.objects.create(
+                document=document,
+                step=previous_task.step,
+                configured_approver=configured_approver,
+                approver=previous_task.approver,
+                document_version=document.version,
+                due_date=timezone.localdate() + timedelta(days=due_days),
+            )
+        )
+
+    correction_summary = "\n\n".join(correction_lines)
+    DocumentComment.objects.create(
+        document=document,
+        author=user,
+        text=(
+            f"Ответственным пользователем внесены правки. Версия документа: {document.version}.\n\n"
+            f"{correction_summary}"
+        ),
+    )
+    log_action(
+        user,
+        document,
+        AuditLog.UPDATE,
+        f"Замечания устранены. Создана версия {document.version}; повторное согласование направлено только авторам замечаний.",
+        request,
+    )
+
+    for participant in participants.values():
+        notify_status_change(
+            participant,
+            document,
+            f"Документ {document.system_number} обновлен до версии {document.version}",
+            f"Ответственный {user_identity(user)} внес корректировки.\n\n{correction_summary}",
+        )
+    for retry_task in retry_tasks:
+        notify_approval_required(retry_task.approver, document)
+
+
+@transaction.atomic
 def delegate_task(task, user, delegated_to, comment="", request=None):
     old_approver = task.approver
     old_approver_name = user_identity(old_approver)
@@ -454,6 +680,7 @@ def delegate_task(task, user, delegated_to, comment="", request=None):
         step=task.step,
         configured_approver=task.configured_approver,
         approver=delegated_to,
+        document_version=task.document_version,
         due_date=task.due_date,
     )
     log_action(

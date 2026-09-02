@@ -8,6 +8,9 @@ from .models import (
     Attachment,
     AuditLog,
     ContractKind,
+    CorrespondenceDepartment,
+    CorrespondenceRecord,
+    CorrespondenceSequence,
     CustomFieldDefinition,
     Department,
     Document,
@@ -18,6 +21,7 @@ from .models import (
     EmailDelivery,
     Notification,
     PasswordResetRequest,
+    RevisionRequest,
     UserProfile,
 )
 
@@ -34,6 +38,62 @@ class UserProfileAdmin(admin.ModelAdmin):
     list_display = ["user", "patronymic", "department", "position", "phone"]
     search_fields = ["user__username", "user__first_name", "user__last_name", "patronymic", "position"]
     list_filter = ["department"]
+
+
+@admin.register(CorrespondenceDepartment)
+class CorrespondenceDepartmentAdmin(admin.ModelAdmin):
+    list_display = ["code", "name", "is_active"]
+    list_editable = ["name", "is_active"]
+    search_fields = ["code", "name"]
+    list_filter = ["is_active"]
+
+
+@admin.register(CorrespondenceSequence)
+class CorrespondenceSequenceAdmin(admin.ModelAdmin):
+    list_display = ["kind", "next_number", "updated_at"]
+    readonly_fields = ["kind", "created_at", "updated_at"]
+    fields = ["kind", "next_number", "created_at", "updated_at"]
+
+
+@admin.register(CorrespondenceRecord)
+class CorrespondenceRecordAdmin(admin.ModelAdmin):
+    list_display = [
+        "registration_number",
+        "kind",
+        "subject",
+        "sender",
+        "department",
+        "registration_date",
+        "executor",
+        "signed_document_status",
+        "status",
+    ]
+    list_filter = ["kind", "status", "department", "registration_date"]
+    search_fields = [
+        "registration_number",
+        "subject",
+        "addressee",
+        "addressee_person",
+        "sender",
+        "related_document_number",
+    ]
+    readonly_fields = [
+        "sequence_number",
+        "registration_number",
+        "created_by",
+        "reserved_at",
+        "registered_at",
+        "template_generated_at",
+        "created_at",
+        "updated_at",
+    ]
+
+    @admin.display(description="Подписанный документ", boolean=True)
+    def signed_document_status(self, obj):
+        return obj.has_signed_document
+
+    def has_add_permission(self, request):
+        return False
 
 
 @admin.register(ContractKind)
@@ -109,7 +169,7 @@ class DocumentAdmin(admin.ModelAdmin):
     fieldsets = [
         ("Регистрация", {"fields": ["document_type", "title", "system_number", "internal_number", "status"]}),
         ("Договор", {"fields": ["contract_kind", "document_purpose"]}),
-        ("Ответственные", {"fields": ["author", "responsible", "department", "route"]}),
+        ("Ответственные", {"fields": ["author", "responsible", "department", "route", "approval_route_type"]}),
         ("Сроки и реквизиты", {"fields": ["registration_date", "due_date", "amount", "counterparty"]}),
         ("Содержание", {"fields": ["summary", "custom_data"]}),
         ("Служебное", {"fields": ["is_deleted", "archived_at", "created_at", "updated_at"]}),
@@ -135,6 +195,7 @@ class ApprovalTaskAdmin(admin.ModelAdmin):
     list_display = [
         "document",
         "approver",
+        "document_version",
         "status",
         "due_date",
         "reminder_sent_at",
@@ -150,6 +211,21 @@ class ApprovalTaskAdmin(admin.ModelAdmin):
         return "Нет"
 
     overdue_badge.short_description = "Просрочка"
+
+
+@admin.register(RevisionRequest)
+class RevisionRequestAdmin(admin.ModelAdmin):
+    list_display = [
+        "document",
+        "requested_by",
+        "document_version",
+        "status",
+        "resolved_in_version",
+        "created_at",
+    ]
+    list_filter = ["status", "document_version", "resolved_in_version"]
+    search_fields = ["document__system_number", "document__title", "requested_by__username", "comment"]
+    readonly_fields = ["created_at", "updated_at"]
 
 
 @admin.register(DocumentComment)

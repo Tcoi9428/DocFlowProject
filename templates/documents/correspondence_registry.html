@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% load user_display %}
+
+{% block title %}Корреспонденция | DocFlow{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <h1>Корреспонденция</h1>
+        <p>Регистрация писем и служебных записок в едином реестре.</p>
+    </div>
+    {% if active_section == "outgoing" %}
+        <a class="button primary" href="{% url 'documents:outgoing_correspondence_create' %}">+ Зарегистрировать письмо</a>
+    {% elif active_section == "incoming" %}
+        <a class="button primary" href="{% url 'documents:incoming_correspondence_create' %}">+ Зарегистрировать письмо</a>
+    {% endif %}
+</section>
+
+<nav class="tabs correspondence-tabs" aria-label="Виды корреспонденции">
+    <a class="{% if active_section == 'incoming' %}active{% endif %}" href="{% url 'documents:correspondence_section' 'incoming' %}">Входящая корреспонденция</a>
+    <a class="{% if active_section == 'outgoing' %}active{% endif %}" href="{% url 'documents:correspondence_section' 'outgoing' %}">Исходящая корреспонденция</a>
+    <a class="{% if active_section == 'memos' %}active{% endif %}" href="{% url 'documents:correspondence_section' 'memos' %}">Служебные записки</a>
+</nav>
+
+{% if active_section == "outgoing" or active_section == "incoming" %}
+    <div class="registry-scope" aria-label="Область реестра">
+        <a class="{% if scope == 'mine' %}active{% endif %}" href="?scope=mine">Мои записи</a>
+        <a class="{% if scope == 'all' %}active{% endif %}" href="?scope=all">Общий реестр</a>
+    </div>
+
+    {% if active_section == "outgoing" %}
+        <section class="panel correspondence-registry-panel">
+            <div class="toolbar">
+                <div>
+                    <h2>{% if scope == "all" %}Общий реестр исходящих писем{% else %}Мои исходящие письма{% endif %}</h2>
+                    <p class="muted">Подписанный документ можно прикрепить сразу или позднее из карточки письма.</p>
+                </div>
+                <span class="badge badge-blue">Записей: {{ records|length }}</span>
+            </div>
+            <div class="table-wrap">
+                <table class="table responsive-table correspondence-table">
+                    <thead>
+                        <tr>
+                            <th>Номер</th>
+                            <th>Наименование</th>
+                            <th>Адресат / кому</th>
+                            <th>Дата</th>
+                            <th>Исполнитель</th>
+                            <th>Черновик</th>
+                            <th>Подписанный</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for record in records %}
+                            <tr>
+                                <td data-label="Номер"><strong>{{ record.registration_number }}</strong></td>
+                                <td data-label="Наименование">{{ record.subject }}</td>
+                                <td data-label="Адресат / кому">
+                                    {{ record.addressee }}
+                                    {% if record.addressee_person %}<small>{{ record.addressee_person }}</small>{% endif %}
+                                </td>
+                                <td data-label="Дата">{{ record.registration_date|date:"d.m.Y" }}</td>
+                                <td data-label="Исполнитель">{% include "documents/partials/user_display.html" with person=record.executor %}</td>
+                                <td data-label="Черновик">
+                                    {% if record.draft_file %}<span class="badge badge-blue">Прикреплен</span>{% else %}<span class="badge">Нет</span>{% endif %}
+                                </td>
+                                <td data-label="Подписанный">
+                                    {% if record.signed_file %}<span class="badge badge-success">Прикреплен</span>{% else %}<span class="badge badge-warn">Не прикреплен</span>{% endif %}
+                                </td>
+                                <td data-label="Действие"><a class="button" href="{% url 'documents:outgoing_correspondence_detail' record.pk %}">Открыть</a></td>
+                            </tr>
+                        {% empty %}
+                            <tr><td colspan="8" class="empty">Зарегистрированных исходящих писем пока нет.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    {% else %}
+        <section class="panel correspondence-registry-panel">
+            <div class="toolbar">
+                <div>
+                    <h2>{% if scope == "all" %}Общий реестр входящих писем{% else %}Мои входящие письма{% endif %}</h2>
+                    <p class="muted">Файл письма можно приложить при регистрации или позднее из карточки.</p>
+                </div>
+                <span class="badge badge-blue">Записей: {{ records|length }}</span>
+            </div>
+            <div class="table-wrap">
+                <table class="table responsive-table correspondence-table">
+                    <thead>
+                        <tr>
+                            <th>Номер</th>
+                            <th>Наименование</th>
+                            <th>Отправитель</th>
+                            <th>Дата</th>
+                            <th>Связанное исходящее</th>
+                            <th>Регистратор</th>
+                            <th>Файл</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for record in records %}
+                            <tr>
+                                <td data-label="Номер"><strong>{{ record.registration_number }}</strong></td>
+                                <td data-label="Наименование">{{ record.subject }}</td>
+                                <td data-label="Отправитель">{{ record.sender }}</td>
+                                <td data-label="Дата">{{ record.registration_date|date:"d.m.Y" }}</td>
+                                <td data-label="Связанное исходящее">
+                                    {% if record.related_outgoing %}
+                                        <a href="{% url 'documents:outgoing_correspondence_detail' record.related_outgoing.pk %}">{{ record.related_outgoing.registration_number }}</a>
+                                    {% elif record.related_document_number %}
+                                        {{ record.related_document_number }} <small>старый реестр</small>
+                                    {% else %}-{% endif %}
+                                </td>
+                                <td data-label="Регистратор">{% include "documents/partials/user_display.html" with person=record.created_by %}</td>
+                                <td data-label="Файл">
+                                    {% if record.incoming_file %}<span class="badge badge-success">Прикреплен</span>{% else %}<span class="badge">Нет</span>{% endif %}
+                                </td>
+                                <td data-label="Действие"><a class="button" href="{% url 'documents:incoming_correspondence_detail' record.pk %}">Открыть</a></td>
+                            </tr>
+                        {% empty %}
+                            <tr><td colspan="8" class="empty">Зарегистрированных входящих писем пока нет.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    {% endif %}
+{% else %}
+    <section class="panel correspondence-placeholder">
+        <span class="placeholder-icon">{% if active_section == "incoming" %}02{% else %}03{% endif %}</span>
+        <div>
+            <h2>{% if active_section == "incoming" %}Входящая корреспонденция{% else %}Служебные записки{% endif %}</h2>
+            <p>Форма регистрации этого раздела будет добавлена следующим этапом после проверки исходящей корреспонденции.</p>
+        </div>
+    </section>
+{% endif %}
+{% endblock %}
