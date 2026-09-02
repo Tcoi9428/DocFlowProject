@@ -38,7 +38,11 @@
             <dt>Наименование</dt><dd>{{ record.subject }}</dd>
             <dt>Дата</dt><dd>{{ record.registration_date|date:"d.m.Y" }}</dd>
             <dt>Исполнитель</dt><dd>{% include "documents/partials/user_display.html" with person=record.executor %}</dd>
+            {% if record.legacy_executor_name %}<dt>Исполнитель в старом реестре</dt><dd>{{ record.legacy_executor_name }}</dd>{% endif %}
             <dt>Зарегистрировал</dt><dd>{% include "documents/partials/user_display.html" with person=record.created_by %}</dd>
+            {% if record.is_historical_import %}
+                <dt>Источник</dt><dd>{{ record.import_source }}, строка {{ record.import_source_row }}</dd>
+            {% endif %}
         </dl>
     </div>
 

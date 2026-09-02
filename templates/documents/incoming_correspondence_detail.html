@@ -23,9 +23,14 @@
             <dt>Подразделение</dt><dd>{{ record.department }}</dd>
             <dt>Наименование</dt><dd>{{ record.subject }}</dd>
             <dt>Отправитель</dt><dd>{{ record.sender }}</dd>
-            <dt>Дата</dt><dd>{{ record.registration_date|date:"d.m.Y" }}</dd>
+            <dt>Номер документа отправителя</dt><dd>{{ record.external_document_number|default:"-" }}</dd>
+            <dt>Дата документа отправителя</dt><dd>{{ record.document_date|date:"d.m.Y"|default:"-" }}</dd>
+            <dt>Дата регистрации</dt><dd>{{ record.registration_date|date:"d.m.Y" }}</dd>
             <dt>Резолюция</dt><dd>{{ record.resolution|default:"-"|linebreaksbr }}</dd>
             <dt>Регистратор</dt><dd>{% include "documents/partials/user_display.html" with person=record.created_by %}</dd>
+            {% if record.is_historical_import %}
+                <dt>Источник</dt><dd>{{ record.import_source }}, строка {{ record.import_source_row }}</dd>
+            {% endif %}
             <dt>Связанное исходящее</dt>
             <dd>
                 {% if record.related_outgoing %}

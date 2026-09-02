@@ -110,6 +110,8 @@ class IncomingCorrespondenceForm(forms.ModelForm):
             "department",
             "subject",
             "sender",
+            "external_document_number",
+            "document_date",
             "related_outgoing",
             "related_document_number",
             "registration_date",
@@ -121,6 +123,10 @@ class IncomingCorrespondenceForm(forms.ModelForm):
                 attrs={"rows": 3, "placeholder": "Введите наименование входящего письма"}
             ),
             "sender": forms.TextInput(attrs={"placeholder": "Организация или ФИО отправителя"}),
+            "external_document_number": forms.TextInput(
+                attrs={"placeholder": "Номер, указанный отправителем"}
+            ),
+            "document_date": forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}),
             "related_document_number": forms.TextInput(
                 attrs={"placeholder": "Номер из старого реестра, если письма нет в системе"}
             ),
@@ -137,6 +143,8 @@ class IncomingCorrespondenceForm(forms.ModelForm):
         self.fields["department"].required = True
         self.fields["subject"].required = True
         self.fields["sender"].required = True
+        self.fields["external_document_number"].required = False
+        self.fields["document_date"].required = False
         self.fields["related_outgoing"].queryset = CorrespondenceRecord.objects.filter(
             kind=CorrespondenceRecord.OUTGOING,
             status=CorrespondenceRecord.REGISTERED,
@@ -153,6 +161,7 @@ class IncomingCorrespondenceForm(forms.ModelForm):
         self.fields["resolution"].required = False
         self.fields["incoming_file"].required = False
         self.fields["registration_date"].input_formats = ["%Y-%m-%d"]
+        self.fields["document_date"].input_formats = ["%Y-%m-%d"]
         max_size_mb = settings.MAX_UPLOAD_SIZE // 1024 // 1024
         self.fields["incoming_file"].help_text = (
             f"Поле необязательное. Максимальный размер файла — {max_size_mb} МБ."

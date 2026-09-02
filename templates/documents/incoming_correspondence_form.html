@@ -31,7 +31,7 @@
                 </div>
             </div>
             {% for field in form %}
-                {% if field.name == "department" or field.name == "subject" or field.name == "sender" or field.name == "registration_date" or field.name == "resolution" %}
+                {% if field.name == "department" or field.name == "subject" or field.name == "sender" or field.name == "external_document_number" or field.name == "document_date" or field.name == "registration_date" or field.name == "resolution" %}
                     <div class="inline-field">
                         <label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %}<span class="required-mark">*</span>{% endif %}</label>
                         <div>

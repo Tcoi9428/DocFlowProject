@@ -107,7 +107,7 @@ class CorrespondenceSequence(TimeStampedModel):
         if not self.kind:
             return
         last_used = (
-            CorrespondenceRecord.objects.filter(kind=self.kind)
+            CorrespondenceRecord.objects.filter(kind=self.kind, is_historical_import=False)
             .aggregate(max_number=Max("sequence_number"))
             .get("max_number")
             or 0
@@ -184,6 +184,12 @@ class CorrespondenceRecord(TimeStampedModel):
         max_length=100,
         blank=True,
     )
+    external_document_number = models.CharField(
+        "Номер документа отправителя",
+        max_length=100,
+        blank=True,
+    )
+    document_date = models.DateField("Дата документа отправителя", null=True, blank=True)
     addressee = models.CharField("Адресат", max_length=250, blank=True)
     addressee_person = models.CharField("Кому", max_length=250, blank=True)
     sender = models.CharField("Отправитель", max_length=250, blank=True)
@@ -223,6 +229,14 @@ class CorrespondenceRecord(TimeStampedModel):
         blank=True,
     )
     incoming_original_name = models.CharField("Имя файла входящего письма", max_length=255, blank=True)
+    legacy_executor_name = models.CharField(
+        "Исполнитель в старом реестре",
+        max_length=200,
+        blank=True,
+    )
+    is_historical_import = models.BooleanField("Импортировано из старого реестра", default=False)
+    import_source = models.CharField("Источник импорта", max_length=255, blank=True, db_index=True)
+    import_source_row = models.PositiveIntegerField("Строка в источнике", null=True, blank=True)
 
     class Meta:
         verbose_name = "Запись корреспонденции"

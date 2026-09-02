@@ -22,13 +22,29 @@
     <a class="{% if active_section == 'memos' %}active{% endif %}" href="{% url 'documents:correspondence_section' 'memos' %}">Служебные записки</a>
 </nav>
 
-{% if active_section == "outgoing" or active_section == "incoming" %}
+<div class="correspondence-registry-tools">
     <div class="registry-scope" aria-label="Область реестра">
-        <a class="{% if scope == 'mine' %}active{% endif %}" href="?scope=mine">Мои записи</a>
-        <a class="{% if scope == 'all' %}active{% endif %}" href="?scope=all">Общий реестр</a>
+        <a class="{% if scope == 'mine' %}active{% endif %}" href="?scope=mine{% if query %}&amp;q={{ query|urlencode }}{% endif %}">Мои записи</a>
+        <a class="{% if scope == 'all' %}active{% endif %}" href="?scope=all{% if query %}&amp;q={{ query|urlencode }}{% endif %}">Общий реестр</a>
     </div>
+    <form class="correspondence-search" method="get" role="search">
+        <input type="hidden" name="scope" value="{{ scope }}">
+        <label class="sr-only" for="correspondence-search-input">Поиск по реестру</label>
+        <input
+            id="correspondence-search-input"
+            name="q"
+            type="search"
+            value="{{ query }}"
+            maxlength="200"
+            placeholder="Номер, наименование или адресат"
+            autocomplete="off"
+        >
+        <button class="button primary" type="submit">Найти</button>
+        {% if query %}<a class="button" href="?scope={{ scope }}">Сбросить</a>{% endif %}
+    </form>
+</div>
 
-    {% if active_section == "outgoing" %}
+{% if active_section == "outgoing" %}
         <section class="panel correspondence-registry-panel">
             <div class="toolbar">
                 <div>
@@ -71,13 +87,13 @@
                                 <td data-label="Действие"><a class="button" href="{% url 'documents:outgoing_correspondence_detail' record.pk %}">Открыть</a></td>
                             </tr>
                         {% empty %}
-                            <tr><td colspan="8" class="empty">Зарегистрированных исходящих писем пока нет.</td></tr>
+                            <tr><td colspan="8" class="empty">{% if query %}По запросу «{{ query }}» ничего не найдено.{% else %}Зарегистрированных исходящих писем пока нет.{% endif %}</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
         </section>
-    {% else %}
+{% elif active_section == "incoming" %}
         <section class="panel correspondence-registry-panel">
             <div class="toolbar">
                 <div>
@@ -93,7 +109,8 @@
                             <th>Номер</th>
                             <th>Наименование</th>
                             <th>Отправитель</th>
-                            <th>Дата</th>
+                            <th>Дата регистрации</th>
+                            <th>Документ отправителя</th>
                             <th>Связанное исходящее</th>
                             <th>Регистратор</th>
                             <th>Файл</th>
@@ -106,7 +123,11 @@
                                 <td data-label="Номер"><strong>{{ record.registration_number }}</strong></td>
                                 <td data-label="Наименование">{{ record.subject }}</td>
                                 <td data-label="Отправитель">{{ record.sender }}</td>
-                                <td data-label="Дата">{{ record.registration_date|date:"d.m.Y" }}</td>
+                                <td data-label="Дата регистрации">{{ record.registration_date|date:"d.m.Y" }}</td>
+                                <td data-label="Документ отправителя">
+                                    {{ record.external_document_number|default:"-" }}
+                                    {% if record.document_date %}<small>от {{ record.document_date|date:"d.m.Y" }}</small>{% endif %}
+                                </td>
                                 <td data-label="Связанное исходящее">
                                     {% if record.related_outgoing %}
                                         <a href="{% url 'documents:outgoing_correspondence_detail' record.related_outgoing.pk %}">{{ record.related_outgoing.registration_number }}</a>
@@ -121,19 +142,51 @@
                                 <td data-label="Действие"><a class="button" href="{% url 'documents:incoming_correspondence_detail' record.pk %}">Открыть</a></td>
                             </tr>
                         {% empty %}
-                            <tr><td colspan="8" class="empty">Зарегистрированных входящих писем пока нет.</td></tr>
+                            <tr><td colspan="9" class="empty">{% if query %}По запросу «{{ query }}» ничего не найдено.{% else %}Зарегистрированных входящих писем пока нет.{% endif %}</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
         </section>
-    {% endif %}
 {% else %}
-    <section class="panel correspondence-placeholder">
-        <span class="placeholder-icon">{% if active_section == "incoming" %}02{% else %}03{% endif %}</span>
-        <div>
-            <h2>{% if active_section == "incoming" %}Входящая корреспонденция{% else %}Служебные записки{% endif %}</h2>
-            <p>Форма регистрации этого раздела будет добавлена следующим этапом после проверки исходящей корреспонденции.</p>
+    <section class="panel correspondence-registry-panel">
+        <div class="toolbar">
+            <div>
+                <h2>{% if scope == "all" %}Общий реестр служебных записок{% else %}Мои служебные записки{% endif %}</h2>
+                <p class="muted">Сейчас доступен просмотр записей, импортированных из исторического реестра.</p>
+            </div>
+            <span class="badge badge-blue">Записей: {{ records|length }}</span>
+        </div>
+        <div class="table-wrap">
+            <table class="table responsive-table correspondence-table">
+                <thead>
+                    <tr>
+                        <th>Номер</th>
+                        <th>Наименование</th>
+                        <th>На кого</th>
+                        <th>Дата</th>
+                        <th>Исполнитель</th>
+                        <th>Примечание</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for record in records %}
+                        <tr>
+                            <td data-label="Номер"><strong>{{ record.registration_number }}</strong></td>
+                            <td data-label="Наименование">{{ record.subject }}</td>
+                            <td data-label="На кого">{{ record.addressee_person|default:"-" }}</td>
+                            <td data-label="Дата">{{ record.registration_date|date:"d.m.Y" }}</td>
+                            <td data-label="Исполнитель">
+                                {% include "documents/partials/user_display.html" with person=record.executor %}
+                                {% if record.legacy_executor_name %}<small>В реестре: {{ record.legacy_executor_name }}</small>{% endif %}
+                            </td>
+                            <td data-label="Примечание">{{ record.resolution|default:"-" }}</td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="6" class="empty">{% if query %}По запросу «{{ query }}» ничего не найдено.{% else %}Зарегистрированных служебных записок пока нет.{% endif %}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </section>
 {% endif %}

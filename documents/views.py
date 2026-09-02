@@ -231,26 +231,35 @@ def correspondence_registry(request, section="outgoing"):
         raise Http404("Раздел корреспонденции не найден.")
 
     scope = request.GET.get("scope", "mine")
-    records = CorrespondenceRecord.objects.none()
-    if section in {"outgoing", "incoming"}:
-        records = (
-            CorrespondenceRecord.objects.select_related(
-                "department",
-                "executor",
-                "executor__userprofile",
-                "created_by",
-                "created_by__userprofile",
-                "reply_to",
-                "related_outgoing",
-            )
-            .filter(
-                kind=section_kinds[section],
-                status=CorrespondenceRecord.REGISTERED,
-            )
+    query = request.GET.get("q", "").strip()[:200]
+    records = (
+        CorrespondenceRecord.objects.select_related(
+            "department",
+            "executor",
+            "executor__userprofile",
+            "created_by",
+            "created_by__userprofile",
+            "reply_to",
+            "related_outgoing",
         )
-        if scope != "all":
-            scope = "mine"
-            records = records.filter(Q(created_by=request.user) | Q(executor=request.user)).distinct()
+        .filter(
+            kind=section_kinds[section],
+            status=CorrespondenceRecord.REGISTERED,
+        )
+    )
+    if scope != "all":
+        scope = "mine"
+        records = records.filter(Q(created_by=request.user) | Q(executor=request.user)).distinct()
+    if query:
+        records = records.filter(
+            Q(registration_number__icontains=query)
+            | Q(external_document_number__icontains=query)
+            | Q(related_document_number__icontains=query)
+            | Q(subject__icontains=query)
+            | Q(addressee__icontains=query)
+            | Q(addressee_person__icontains=query)
+            | Q(sender__icontains=query)
+        )
 
     return render(
         request,
@@ -258,6 +267,7 @@ def correspondence_registry(request, section="outgoing"):
         {
             "active_section": section,
             "scope": scope,
+            "query": query,
             "records": records,
         },
     )

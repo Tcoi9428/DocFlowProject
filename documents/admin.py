@@ -62,24 +62,30 @@ class CorrespondenceRecordAdmin(admin.ModelAdmin):
         "kind",
         "subject",
         "sender",
+        "external_document_number",
         "department",
         "registration_date",
         "executor",
         "signed_document_status",
         "status",
     ]
-    list_filter = ["kind", "status", "department", "registration_date"]
+    list_filter = ["kind", "status", "department", "registration_date", "is_historical_import"]
     search_fields = [
         "registration_number",
         "subject",
         "addressee",
         "addressee_person",
         "sender",
+        "external_document_number",
+        "legacy_executor_name",
         "related_document_number",
     ]
     readonly_fields = [
         "sequence_number",
         "registration_number",
+        "is_historical_import",
+        "import_source",
+        "import_source_row",
         "created_by",
         "reserved_at",
         "registered_at",

@@ -86,7 +86,7 @@ def reserve_correspondence_number(user, kind):
         return existing
 
     last_used = (
-        CorrespondenceRecord.objects.filter(kind=kind)
+        CorrespondenceRecord.objects.filter(kind=kind, is_historical_import=False)
         .aggregate(max_number=Max("sequence_number"))
         .get("max_number")
         or 0

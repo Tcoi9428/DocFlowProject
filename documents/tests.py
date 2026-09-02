@@ -1,16 +1,18 @@
-from datetime import timedelta
+from datetime import date, timedelta
+from io import BytesIO, StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from zipfile import ZipFile
-from io import BytesIO
 import xml.etree.ElementTree as ET
 
 from django.contrib.auth.models import User
 from django.core import mail
+from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.utils import timezone
+from openpyxl import Workbook as OpenpyxlWorkbook
 
 from .correspondence import (
     attach_generated_outgoing_template,
@@ -959,5 +961,144 @@ class IncomingCorrespondenceTests(TestCase):
         registry_response = self.client.get("/correspondence/incoming/?scope=all")
         self.assertContains(registry_response, "02-01-25")
         self.assertContains(registry_response, "Прикреплен")
+
+
+class CorrespondenceImportTests(TestCase):
+    def setUp(self):
+        self.registrar = User.objects.create_user(
+            username="archive_registrar",
+            password="test",
+            first_name="Иван",
+            last_name="Петрикин",
+        )
+        self.executor = User.objects.create_user(
+            username="executor",
+            password="test",
+            first_name="Ольга",
+            last_name="Ауст",
+        )
+        profile = self.executor.userprofile
+        profile.patronymic = "Владимировна"
+        profile.save(update_fields=["patronymic", "updated_at"])
+        for code, name in [("01", "Общий отдел"), ("02", "Инжиниринг"), ("03", "Сервис")]:
+            CorrespondenceDepartment.objects.update_or_create(
+                code=code,
+                defaults={"name": name, "is_active": True},
+            )
+        for kind in (CorrespondenceRecord.OUTGOING, CorrespondenceRecord.INCOMING, CorrespondenceRecord.MEMO):
+            CorrespondenceSequence.objects.update_or_create(kind=kind, defaults={"next_number": 1})
+
+        self.temp_directory = TemporaryDirectory()
+        self.addCleanup(self.temp_directory.cleanup)
+        self.xlsx_path = Path(self.temp_directory.name) / "2026.xlsx"
+        self.build_workbook(self.xlsx_path)
+
+    @staticmethod
+    def build_workbook(path):
+        workbook = OpenpyxlWorkbook()
+        outgoing = workbook.active
+        outgoing.title = " 01-0х-хх регистрация исходящих"
+        outgoing.append(["*Подсказка"])
+        outgoing.append(
+            ["Номер ИСХ", "В ответ на номер ВХД", "Адресат", "Кому", "Наименование", "Дата", "Столбец1", "Исполнитель"]
+        )
+        outgoing.append(["01-02-661", "", "АО Заказчик", "Директору", "Письмо 2026", date(2026, 9, 2), "", "Ауст О.В."])
+        outgoing.append(["01-02-100", "", "АО Архив", "Директору", "Письмо 2025", date(2025, 9, 2), "", "Ауст О.В."])
+
+        incoming = workbook.create_sheet("02-0х-хх регистрация входящих")
+        incoming.append(
+            ["№ п/п", "Номер исходящего в ответ на входящее ", "Дата регистрации", "Отправитель", "Номер документа", "Дата", "Наименование", "Резолюция", "Ответ"]
+        )
+        incoming.append([142, "02-01-240", date(2026, 8, 10), "АО Поставщик", "22/468-К", date(2026, 8, 6), "Входящее письмо", "Передать в работу", "01-02-661 от 02.09.2026"])
+
+        memos = workbook.create_sheet("03-0х-хх регистрация СЗ")
+        memos.append(["номер", "дата", "наименование", "на кого", "исполнитель", "Примечание"])
+        memos.append(["03-03-514", date(2026, 9, 1), "О закупке ТМЦ", "Петрикину И.И.", "Неизвестный И.И.", "Согласовано"])
+        workbook.save(path)
+
+    def run_import(self, apply=False):
+        output = StringIO()
+        options = {
+            "year": 2026,
+            "registrar": self.registrar.username,
+            "stdout": output,
+        }
+        if apply:
+            options["apply"] = True
+        call_command("import_correspondence_xlsx", str(self.xlsx_path), **options)
+        return output.getvalue()
+
+    def test_import_is_previewable_idempotent_and_preserves_historical_fields(self):
+        preview = self.run_import()
+
+        self.assertIn("ПРЕДВАРИТЕЛЬНАЯ ПРОВЕРКА", preview)
+        self.assertEqual(CorrespondenceRecord.objects.count(), 0)
+
+        result = self.run_import(apply=True)
+
+        self.assertIn("ИМПОРТ ВЫПОЛНЕН", result)
+        self.assertEqual(CorrespondenceRecord.objects.count(), 3)
+        outgoing = CorrespondenceRecord.objects.get(kind=CorrespondenceRecord.OUTGOING)
+        incoming = CorrespondenceRecord.objects.get(kind=CorrespondenceRecord.INCOMING)
+        memo = CorrespondenceRecord.objects.get(kind=CorrespondenceRecord.MEMO)
+        self.assertEqual(outgoing.registration_number, "01-02-661")
+        self.assertEqual(outgoing.executor, self.executor)
+        self.assertEqual(outgoing.legacy_executor_name, "Ауст О.В.")
+        self.assertEqual(incoming.external_document_number, "22/468-К")
+        self.assertEqual(incoming.document_date, date(2026, 8, 6))
+        self.assertEqual(incoming.related_outgoing, outgoing)
+        self.assertEqual(memo.executor, self.registrar)
+        self.assertEqual(memo.legacy_executor_name, "Неизвестный И.И.")
+        self.assertTrue(all(record.is_historical_import for record in (outgoing, incoming, memo)))
+        self.assertGreater(outgoing.sequence_number, 1_000_000_000)
+        self.assertEqual(CorrespondenceSequence.objects.get(kind=CorrespondenceRecord.OUTGOING).next_number, 662)
+        self.assertEqual(CorrespondenceSequence.objects.get(kind=CorrespondenceRecord.INCOMING).next_number, 241)
+        self.assertEqual(CorrespondenceSequence.objects.get(kind=CorrespondenceRecord.MEMO).next_number, 515)
+
+        self.run_import(apply=True)
+
+        self.assertEqual(CorrespondenceRecord.objects.count(), 3)
+        next_record = reserve_correspondence_number(self.registrar, CorrespondenceRecord.OUTGOING)
+        self.assertEqual(next_record.sequence_number, 662)
+
+    def test_imported_memos_are_visible_in_registry(self):
+        self.run_import(apply=True)
+        self.client.force_login(self.registrar)
+
+        response = self.client.get("/correspondence/memos/?scope=all")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "03-03-514")
+        self.assertContains(response, "О закупке ТМЦ")
+
+    def test_registry_searches_correspondence_by_number_subject_and_party(self):
+        self.run_import(apply=True)
+        self.client.force_login(self.registrar)
+
+        cases = (
+            ("outgoing", "01-02-661", "01-02-661"),
+            ("outgoing", "АО Заказчик", "Письмо 2026"),
+            ("incoming", "22/468-К", "02-01-240"),
+            ("incoming", "АО Поставщик", "Входящее письмо"),
+            ("memos", "закупке ТМЦ", "03-03-514"),
+            ("memos", "Петрикину", "О закупке ТМЦ"),
+        )
+        for section, query, expected in cases:
+            with self.subTest(section=section, query=query):
+                response = self.client.get(
+                    f"/correspondence/{section}/",
+                    {"scope": "all", "q": query},
+                )
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.context["query"], query)
+                self.assertEqual(len(response.context["records"]), 1)
+                self.assertContains(response, expected)
+
+        empty_response = self.client.get(
+            "/correspondence/outgoing/",
+            {"scope": "all", "q": "несуществующий документ"},
+        )
+        self.assertEqual(len(empty_response.context["records"]), 0)
+        self.assertContains(empty_response, "ничего не найдено")
 
 # Create your tests here.
