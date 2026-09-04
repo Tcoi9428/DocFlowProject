@@ -14,6 +14,7 @@ urlpatterns = [
     path("all/", views.all_documents, name="all_documents"),
     path("archive/", views.archive, name="archive"),
     path("correspondence/", views.correspondence_registry, name="correspondence"),
+    path("correspondence/guide/", views.correspondence_guide, name="correspondence_guide"),
     path("correspondence/<str:section>/", views.correspondence_registry, name="correspondence_section"),
     path("correspondence/incoming/new/", views.incoming_correspondence_create, name="incoming_correspondence_create"),
     path(

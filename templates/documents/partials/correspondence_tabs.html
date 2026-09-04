@@ -1,0 +1,6 @@
+<nav class="tabs correspondence-tabs" aria-label="Разделы корреспонденции">
+    <a class="{% if active_section == 'incoming' %}active{% endif %}" href="{% url 'documents:correspondence_section' 'incoming' %}">Входящая корреспонденция</a>
+    <a class="{% if active_section == 'outgoing' %}active{% endif %}" href="{% url 'documents:correspondence_section' 'outgoing' %}">Исходящая корреспонденция</a>
+    <a class="{% if active_section == 'memos' %}active{% endif %}" href="{% url 'documents:correspondence_section' 'memos' %}">Служебные записки</a>
+    <a class="{% if active_section == 'guide' %}active{% endif %}" href="{% url 'documents:correspondence_guide' %}">Как работать</a>
+</nav>

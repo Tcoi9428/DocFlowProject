@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+
+{% block title %}Инструкция по корреспонденции | DocFlow{% endblock %}
+
+{% block content %}
+<section class="page-header guide-page-header">
+    <div>
+        <h1>Как работать с корреспонденцией</h1>
+        <p>Короткая инструкция по регистрации писем и служебных записок.</p>
+    </div>
+    <a class="button primary" href="{% url 'documents:correspondence_section' 'outgoing' %}">Открыть реестр</a>
+</section>
+
+{% include "documents/partials/correspondence_tabs.html" %}
+
+<section class="guide-overview" aria-labelledby="guide-start-title">
+    <div class="guide-overview-copy">
+        <span class="guide-eyebrow">Начните здесь</span>
+        <h2 id="guide-start-title">Выберите нужный вид регистрации</h2>
+        <p>Первая часть номера показывает вид записи, вторая — подразделение, третья — зарезервированный порядковый номер.</p>
+    </div>
+    <div class="guide-number-example" aria-label="Пример регистрационного номера">
+        <span><strong>01</strong><small>вид</small></span>
+        <b>-</b>
+        <span><strong>02</strong><small>подразделение</small></span>
+        <b>-</b>
+        <span><strong>669</strong><small>порядковый</small></span>
+    </div>
+</section>
+
+<nav class="guide-jump-grid" aria-label="Быстрый переход к инструкции">
+    <a class="guide-jump guide-jump-incoming" href="#guide-incoming">
+        <span class="guide-jump-code">02</span>
+        <span><strong>Входящее письмо</strong><small>Получили документ от организации</small></span>
+    </a>
+    <a class="guide-jump guide-jump-outgoing" href="#guide-outgoing">
+        <span class="guide-jump-code">01</span>
+        <span><strong>Исходящее письмо</strong><small>Готовите письмо внешнему адресату</small></span>
+    </a>
+    <a class="guide-jump guide-jump-memo" href="#guide-memo">
+        <span class="guide-jump-code">03</span>
+        <span><strong>Служебная записка</strong><small>Оформляете внутреннее обращение</small></span>
+    </a>
+</nav>
+
+<aside class="guide-callout guide-callout-important">
+    <span class="guide-callout-mark">!</span>
+    <div>
+        <strong>Номер резервируется сразу после открытия формы</strong>
+        <p>Другой пользователь уже не получит ту же порядковую часть. После выбора подразделения номер примет полный вид, например <b>01-02-669</b>.</p>
+    </div>
+</aside>
+
+<section class="guide-process guide-process-incoming" id="guide-incoming">
+    <header class="guide-process-header">
+        <span class="guide-process-icon"><svg><use href="#icon-mail"></use></svg></span>
+        <div>
+            <span class="guide-process-code">Код 02</span>
+            <h2>Регистрация входящего письма</h2>
+            <p>Используйте, когда документ поступил от внешней организации или контрагента.</p>
+        </div>
+        <a class="button" href="{% url 'documents:incoming_correspondence_create' %}">Зарегистрировать</a>
+    </header>
+    <ol class="guide-steps">
+        <li><span>1</span><div><strong>Выберите подразделение</strong><p>Код подразделения станет средней частью регистрационного номера.</p></div></li>
+        <li><span>2</span><div><strong>Укажите реквизиты письма</strong><p>Заполните наименование, отправителя, номер и дату документа отправителя. Дата регистрации по умолчанию равна текущей.</p></div></li>
+        <li><span>3</span><div><strong>Свяжите с исходящим письмом</strong><p>Выберите ранее зарегистрированное исходящее письмо. Для старого документа, которого нет в DocFlow, введите его номер вручную.</p></div></li>
+        <li><span>4</span><div><strong>Добавьте резолюцию и файл</strong><p>Резолюция и скан входящего письма необязательны: файл можно прикрепить позднее из карточки.</p></div></li>
+        <li><span>5</span><div><strong>Нажмите «Зарегистрировать письмо»</strong><p>Запись появится в личном реестре, а ее карточка сохранит реквизиты, связь и вложение.</p></div></li>
+    </ol>
+</section>
+
+<section class="guide-process guide-process-outgoing" id="guide-outgoing">
+    <header class="guide-process-header">
+        <span class="guide-process-icon"><svg><use href="#icon-file"></use></svg></span>
+        <div>
+            <span class="guide-process-code">Код 01</span>
+            <h2>Регистрация исходящего письма</h2>
+            <p>Используйте для писем, которые компания направляет внешнему адресату.</p>
+        </div>
+        <a class="button" href="{% url 'documents:outgoing_correspondence_create' %}">Зарегистрировать</a>
+    </header>
+    <ol class="guide-steps">
+        <li><span>1</span><div><strong>Выберите подразделение</strong><p>Система сформирует полный номер вида <b>01-КОД-НОМЕР</b>.</p></div></li>
+        <li><span>2</span><div><strong>Заполните адресные данные</strong><p>Укажите организацию в поле «Адресат», получателя в поле «Кому», наименование письма, дату и исполнителя.</p></div></li>
+        <li><span>3</span><div><strong>При необходимости укажите входящее письмо</strong><p>Выберите письмо, на которое готовится ответ, либо укажите номер документа из старого реестра.</p></div></li>
+        <li><span>4</span><div><strong>Скачайте фирменный бланк</strong><p>DocFlow перенесет номер, наименование, адресата и получателя в Word-шаблон. Этот же файл автоматически сохранится как черновик.</p></div></li>
+        <li><span>5</span><div><strong>Зарегистрируйте письмо</strong><p>Подписанный документ можно приложить сразу или позже. До его загрузки в реестре будет видна пометка «Не прикреплен».</p></div></li>
+    </ol>
+</section>
+
+<section class="guide-process guide-process-memo" id="guide-memo">
+    <header class="guide-process-header">
+        <span class="guide-process-icon"><svg><use href="#icon-journal"></use></svg></span>
+        <div>
+            <span class="guide-process-code">Код 03</span>
+            <h2>Регистрация служебной записки</h2>
+            <p>Используйте для внутреннего обращения сотруднику или руководителю.</p>
+        </div>
+        <a class="button" href="{% url 'documents:memo_correspondence_create' %}">Зарегистрировать</a>
+    </header>
+    <ol class="guide-steps">
+        <li><span>1</span><div><strong>Выберите подразделение</strong><p>Система сформирует номер вида <b>03-КОД-НОМЕР</b>.</p></div></li>
+        <li><span>2</span><div><strong>Заполните реквизиты</strong><p>Укажите дату, наименование, кому адресована записка, исполнителя и при необходимости примечание.</p></div></li>
+        <li><span>3</span><div><strong>Скачайте бланк служебной записки</strong><p>Номер, дата, наименование и адресат попадут в Word-шаблон, а файл сохранится в карточке как черновик.</p></div></li>
+        <li><span>4</span><div><strong>Зарегистрируйте записку</strong><p>Подписанный документ можно приложить сразу либо загрузить или заменить позднее в карточке.</p></div></li>
+    </ol>
+</section>
+
+<section class="guide-tools" aria-labelledby="guide-tools-title">
+    <div class="guide-tools-header">
+        <span class="guide-eyebrow">После регистрации</span>
+        <h2 id="guide-tools-title">Как найти запись и проверить файлы</h2>
+    </div>
+    <div class="guide-tools-grid">
+        <article>
+            <span class="guide-tool-icon"><svg><use href="#icon-search"></use></svg></span>
+            <h3>Поиск</h3>
+            <p>Ищите по регистрационному номеру, наименованию, адресату или отправителю.</p>
+        </article>
+        <article>
+            <span class="guide-tool-icon"><svg><use href="#icon-file"></use></svg></span>
+            <h3>Мои записи</h3>
+            <p>Показывает документы, которые вы зарегистрировали или где указаны исполнителем.</p>
+        </article>
+        <article>
+            <span class="guide-tool-icon"><svg><use href="#icon-journal"></use></svg></span>
+            <h3>Общий реестр</h3>
+            <p>Помогает найти зарегистрированную корреспонденцию других сотрудников.</p>
+        </article>
+        <article>
+            <span class="guide-tool-icon"><svg><use href="#icon-check"></use></svg></span>
+            <h3>Карточка</h3>
+            <p>Откройте строку реестра, чтобы скачать черновик и прикрепить недостающий файл.</p>
+        </article>
+    </div>
+</section>
+
+<aside class="guide-callout guide-callout-files">
+    <span class="guide-callout-mark"><svg><use href="#icon-check"></use></svg></span>
+    <div>
+        <strong>Проверяйте цветную пометку в реестре</strong>
+        <p><b>«Прикреплен»</b> означает, что файл уже есть в карточке. <b>«Не прикреплен»</b> напоминает, что подписанный документ или скан нужно добавить позднее.</p>
+    </div>
+</aside>
+{% endblock %}

@@ -1130,6 +1130,31 @@ class MemoCorrespondenceTests(TestCase):
         self.assertEqual(record.signed_original_name, "memo-signed.pdf")
 
 
+class CorrespondenceGuideTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="guide_user", password="test")
+
+    def test_guide_requires_login(self):
+        response = self.client.get("/correspondence/guide/")
+
+        self.assertRedirects(response, "/accounts/login/?next=/correspondence/guide/")
+
+    def test_guide_shows_all_registration_scenarios_and_actions(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get("/correspondence/guide/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Как работать с корреспонденцией")
+        self.assertContains(response, "Регистрация входящего письма")
+        self.assertContains(response, "Регистрация исходящего письма")
+        self.assertContains(response, "Регистрация служебной записки")
+        self.assertContains(response, "/correspondence/incoming/new/")
+        self.assertContains(response, "/correspondence/outgoing/new/")
+        self.assertContains(response, "/correspondence/memos/new/")
+        self.assertContains(response, 'class="active" href="/correspondence/guide/"', html=False)
+
+
 class CorrespondenceImportTests(TestCase):
     def setUp(self):
         self.registrar = User.objects.create_user(

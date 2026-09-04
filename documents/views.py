@@ -280,6 +280,15 @@ def correspondence_registry(request, section="outgoing"):
 
 
 @login_required
+def correspondence_guide(request):
+    return render(
+        request,
+        "documents/correspondence_guide.html",
+        {"active_section": "guide"},
+    )
+
+
+@login_required
 def incoming_correspondence_create(request):
     if request.method == "POST":
         record = get_object_or_404(

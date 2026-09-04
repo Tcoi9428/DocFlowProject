@@ -18,11 +18,7 @@
     {% endif %}
 </section>
 
-<nav class="tabs correspondence-tabs" aria-label="Виды корреспонденции">
-    <a class="{% if active_section == 'incoming' %}active{% endif %}" href="{% url 'documents:correspondence_section' 'incoming' %}">Входящая корреспонденция</a>
-    <a class="{% if active_section == 'outgoing' %}active{% endif %}" href="{% url 'documents:correspondence_section' 'outgoing' %}">Исходящая корреспонденция</a>
-    <a class="{% if active_section == 'memos' %}active{% endif %}" href="{% url 'documents:correspondence_section' 'memos' %}">Служебные записки</a>
-</nav>
+{% include "documents/partials/correspondence_tabs.html" %}
 
 <div class="correspondence-registry-tools">
     <div class="registry-scope" aria-label="Область реестра">
