@@ -12,6 +12,7 @@ from django.forms import HiddenInput
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 
 from .forms import (
     ApprovalActionForm,
@@ -22,6 +23,7 @@ from .forms import (
     DocumentSearchForm,
     IncomingCorrespondenceFileForm,
     IncomingCorrespondenceForm,
+    MemoCorrespondenceForm,
     OutgoingCorrespondenceForm,
     PasswordResetConfirmForm,
     PasswordResetRequestForm,
@@ -46,7 +48,11 @@ from .models import (
     PasswordResetRequest,
     RevisionRequest,
 )
-from .correspondence import attach_generated_outgoing_template, reserve_correspondence_number
+from .correspondence import (
+    attach_generated_memo_template,
+    attach_generated_outgoing_template,
+    reserve_correspondence_number,
+)
 from .services import (
     approve_task,
     delegate_task,
@@ -363,6 +369,137 @@ def incoming_correspondence_file_upload(request, pk):
         else:
             messages.error(request, "Файл не загружен. Проверьте выбранный файл и его размер.")
     return redirect("documents:incoming_correspondence_detail", pk=record.pk)
+
+
+@login_required
+def memo_correspondence_create(request):
+    if request.method == "POST":
+        record = get_object_or_404(
+            CorrespondenceRecord,
+            pk=request.POST.get("reservation_id"),
+            kind=CorrespondenceRecord.MEMO,
+            status=CorrespondenceRecord.RESERVED,
+            created_by=request.user,
+        )
+        form = MemoCorrespondenceForm(request.POST, request.FILES, instance=record)
+        if form.is_valid():
+            signed_file = form.cleaned_data.get("signed_file")
+            record = form.save(commit=False)
+            record.registration_number = record.build_registration_number()
+            if record.draft_file:
+                attach_generated_memo_template(record)
+            if signed_file:
+                record.signed_original_name = signed_file.name
+            record.status = CorrespondenceRecord.REGISTERED
+            record.registered_at = timezone.now()
+            record.save()
+            messages.success(request, f"Служебная записка {record.registration_number} зарегистрирована.")
+            return redirect("documents:memo_correspondence_detail", pk=record.pk)
+    else:
+        record = reserve_correspondence_number(request.user, CorrespondenceRecord.MEMO)
+        form = MemoCorrespondenceForm(instance=record)
+
+    return render(
+        request,
+        "documents/memo_correspondence_form.html",
+        {
+            "record": record,
+            "form": form,
+        },
+    )
+
+
+@login_required
+def memo_template_download(request, pk):
+    if request.method != "POST":
+        return redirect("documents:memo_correspondence_create")
+
+    record = get_object_or_404(
+        CorrespondenceRecord,
+        pk=pk,
+        kind=CorrespondenceRecord.MEMO,
+        status=CorrespondenceRecord.RESERVED,
+        created_by=request.user,
+    )
+    department = CorrespondenceDepartment.objects.filter(
+        pk=request.POST.get("department"),
+        is_active=True,
+    ).first()
+    if not department:
+        return JsonResponse({"error": "Сначала выберите подразделение."}, status=400)
+    subject = request.POST.get("subject", "").strip() or record.subject.strip()
+    if not subject:
+        return JsonResponse({"error": "Сначала заполните поле «Наименование»."}, status=400)
+    addressee_person = request.POST.get("addressee_person", "").strip() or record.addressee_person.strip()
+    if not addressee_person:
+        return JsonResponse({"error": "Сначала заполните поле «Кому адресовано»."}, status=400)
+    registration_date = parse_date(request.POST.get("registration_date", "")) or record.registration_date
+    if not registration_date:
+        return JsonResponse({"error": "Сначала укажите дату служебной записки."}, status=400)
+
+    record.department = department
+    record.registration_date = registration_date
+    record.subject = subject
+    record.addressee_person = addressee_person
+    try:
+        payload, file_name = attach_generated_memo_template(record)
+    except (FileNotFoundError, ValueError) as exc:
+        return JsonResponse({"error": str(exc)}, status=500)
+    return FileResponse(BytesIO(payload), as_attachment=True, filename=file_name)
+
+
+@login_required
+def memo_correspondence_detail(request, pk):
+    record = get_object_or_404(
+        CorrespondenceRecord.objects.select_related(
+            "department",
+            "executor",
+            "executor__userprofile",
+            "created_by",
+            "created_by__userprofile",
+        ),
+        pk=pk,
+        kind=CorrespondenceRecord.MEMO,
+        status=CorrespondenceRecord.REGISTERED,
+    )
+    can_update = request.user.is_superuser or request.user in {record.created_by, record.executor}
+    return render(
+        request,
+        "documents/memo_correspondence_detail.html",
+        {
+            "record": record,
+            "signed_file_form": SignedCorrespondenceFileForm(instance=record),
+            "can_update": can_update,
+        },
+    )
+
+
+@login_required
+def memo_signed_file_upload(request, pk):
+    record = get_object_or_404(
+        CorrespondenceRecord,
+        pk=pk,
+        kind=CorrespondenceRecord.MEMO,
+        status=CorrespondenceRecord.REGISTERED,
+    )
+    if not (request.user.is_superuser or request.user in {record.created_by, record.executor}):
+        messages.error(request, "Заменить подписанный документ может только регистратор или исполнитель.")
+        return redirect("documents:memo_correspondence_detail", pk=record.pk)
+    if request.method == "POST":
+        previous_file_name = record.signed_file.name if record.signed_file else ""
+        file_storage = record.signed_file.storage
+        form = SignedCorrespondenceFileForm(request.POST, request.FILES, instance=record)
+        if form.is_valid():
+            uploaded_file = form.cleaned_data["signed_file"]
+            record = form.save(commit=False)
+            record.signed_original_name = uploaded_file.name
+            record.save(update_fields=["signed_file", "signed_original_name", "updated_at"])
+            if previous_file_name and previous_file_name != record.signed_file.name:
+                file_storage.delete(previous_file_name)
+            messages.success(request, "Подписанный документ прикреплен.")
+        else:
+            messages.error(request, "Файл не загружен. Проверьте выбранный файл и его размер.")
+    return redirect("documents:memo_correspondence_detail", pk=record.pk)
 
 
 @login_required

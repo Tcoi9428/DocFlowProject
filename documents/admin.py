@@ -54,6 +54,14 @@ class CorrespondenceSequenceAdmin(admin.ModelAdmin):
     readonly_fields = ["kind", "created_at", "updated_at"]
     fields = ["kind", "next_number", "created_at", "updated_at"]
 
+    def get_form(self, request, obj=None, **kwargs):
+        form = super().get_form(request, obj, **kwargs)
+        form.base_fields["next_number"].help_text = (
+            "Можно указать значение меньше ранее использованного. "
+            "Если номер уже занят, система автоматически выберет следующий свободный."
+        )
+        return form
+
 
 @admin.register(CorrespondenceRecord)
 class CorrespondenceRecordAdmin(admin.ModelAdmin):

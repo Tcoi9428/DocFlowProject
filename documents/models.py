@@ -102,22 +102,6 @@ class CorrespondenceSequence(TimeStampedModel):
     def __str__(self):
         return f"{self.get_kind_display()}: следующий № {self.next_number}"
 
-    def clean(self):
-        super().clean()
-        if not self.kind:
-            return
-        last_used = (
-            CorrespondenceRecord.objects.filter(kind=self.kind, is_historical_import=False)
-            .aggregate(max_number=Max("sequence_number"))
-            .get("max_number")
-            or 0
-        )
-        if self.next_number <= last_used:
-            raise ValidationError(
-                f"Следующий номер должен быть больше уже зарезервированного № {last_used}."
-            )
-
-
 def correspondence_upload_path(instance, filename):
     ext = Path(filename).suffix.lower()
     year = timezone.localdate().year

@@ -13,6 +13,8 @@
         <a class="button primary" href="{% url 'documents:outgoing_correspondence_create' %}">+ Зарегистрировать письмо</a>
     {% elif active_section == "incoming" %}
         <a class="button primary" href="{% url 'documents:incoming_correspondence_create' %}">+ Зарегистрировать письмо</a>
+    {% elif active_section == "memos" %}
+        <a class="button primary" href="{% url 'documents:memo_correspondence_create' %}">+ Зарегистрировать записку</a>
     {% endif %}
 </section>
 
@@ -153,7 +155,7 @@
         <div class="toolbar">
             <div>
                 <h2>{% if scope == "all" %}Общий реестр служебных записок{% else %}Мои служебные записки{% endif %}</h2>
-                <p class="muted">Сейчас доступен просмотр записей, импортированных из исторического реестра.</p>
+                <p class="muted">Черновик и подписанный документ доступны в карточке служебной записки.</p>
             </div>
             <span class="badge badge-blue">Записей: {{ records|length }}</span>
         </div>
@@ -167,6 +169,8 @@
                         <th>Дата</th>
                         <th>Исполнитель</th>
                         <th>Примечание</th>
+                        <th>Подписанный</th>
+                        <th></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -181,9 +185,13 @@
                                 {% if record.legacy_executor_name %}<small>В реестре: {{ record.legacy_executor_name }}</small>{% endif %}
                             </td>
                             <td data-label="Примечание">{{ record.resolution|default:"-" }}</td>
+                            <td data-label="Подписанный">
+                                {% if record.signed_file %}<span class="badge badge-success">Прикреплен</span>{% else %}<span class="badge badge-warn">Не прикреплен</span>{% endif %}
+                            </td>
+                            <td data-label="Действие"><a class="button" href="{% url 'documents:memo_correspondence_detail' record.pk %}">Открыть</a></td>
                         </tr>
                     {% empty %}
-                        <tr><td colspan="6" class="empty">{% if query %}По запросу «{{ query }}» ничего не найдено.{% else %}Зарегистрированных служебных записок пока нет.{% endif %}</td></tr>
+                        <tr><td colspan="8" class="empty">{% if query %}По запросу «{{ query }}» ничего не найдено.{% else %}Зарегистрированных служебных записок пока нет.{% endif %}</td></tr>
                     {% endfor %}
                 </tbody>
             </table>

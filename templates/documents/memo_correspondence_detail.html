@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% load user_display %}
+
+{% block title %}{{ record.registration_number }} | DocFlow{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <div>
+        <h1>{{ record.subject }}</h1>
+        <p>{{ record.registration_number }} · Служебная записка</p>
+    </div>
+    <a class="button" href="{% url 'documents:correspondence_section' 'memos' %}">К реестру</a>
+</section>
+
+<section class="grid-2 equal correspondence-detail-layout">
+    <div class="panel">
+        <div class="toolbar">
+            <h2>Регистрационные данные</h2>
+            <span class="badge badge-success">Зарегистрировано</span>
+        </div>
+        <dl class="details">
+            <dt>Номер</dt><dd><strong>{{ record.registration_number }}</strong></dd>
+            <dt>Подразделение</dt><dd>{{ record.department|default:"-" }}</dd>
+            <dt>Дата</dt><dd>{{ record.registration_date|date:"d.m.Y" }}</dd>
+            <dt>Наименование</dt><dd>{{ record.subject }}</dd>
+            <dt>Кому адресовано</dt><dd>{{ record.addressee_person }}</dd>
+            <dt>Исполнитель</dt><dd>{% include "documents/partials/user_display.html" with person=record.executor %}</dd>
+            {% if record.legacy_executor_name %}<dt>Исполнитель в старом реестре</dt><dd>{{ record.legacy_executor_name }}</dd>{% endif %}
+            <dt>Примечание</dt><dd>{{ record.resolution|default:"-" }}</dd>
+            <dt>Зарегистрировал</dt><dd>{% include "documents/partials/user_display.html" with person=record.created_by %}</dd>
+            {% if record.is_historical_import %}
+                <dt>Источник</dt><dd>{{ record.import_source }}, строка {{ record.import_source_row }}</dd>
+            {% endif %}
+        </dl>
+    </div>
+
+    <aside class="panel">
+        <h2>Файлы</h2>
+        <div class="correspondence-file-card">
+            <div>
+                <strong>Черновик</strong>
+                <p>{% if record.draft_file %}{{ record.draft_original_name }}{% else %}Бланк не формировался{% endif %}</p>
+            </div>
+            {% if record.draft_file %}<a class="button" href="{% url 'documents:correspondence_file_download' record.pk 'draft' %}">Скачать</a>{% endif %}
+        </div>
+        <div class="correspondence-file-card {% if not record.signed_file %}is-missing{% endif %}">
+            <div>
+                <strong>Подписанный документ</strong>
+                <p>{% if record.signed_file %}{{ record.signed_original_name }}{% else %}Файл пока не прикреплен{% endif %}</p>
+            </div>
+            {% if record.signed_file %}<a class="button" href="{% url 'documents:correspondence_file_download' record.pk 'signed' %}">Скачать</a>{% endif %}
+        </div>
+
+        {% if can_update %}
+            <form class="signed-upload-form" method="post" enctype="multipart/form-data" action="{% url 'documents:memo_signed_file_upload' record.pk %}">
+                {% csrf_token %}
+                <label for="{{ signed_file_form.signed_file.id_for_label }}">{% if record.signed_file %}Заменить подписанный документ{% else %}Прикрепить подписанный документ{% endif %}</label>
+                {{ signed_file_form.signed_file }}
+                <button class="button primary" type="submit">Сохранить файл</button>
+            </form>
+        {% endif %}
+    </aside>
+</section>
+{% endblock %}

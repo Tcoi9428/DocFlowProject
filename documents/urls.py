@@ -26,6 +26,22 @@ urlpatterns = [
         views.incoming_correspondence_file_upload,
         name="incoming_correspondence_file_upload",
     ),
+    path("correspondence/memos/new/", views.memo_correspondence_create, name="memo_correspondence_create"),
+    path(
+        "correspondence/memos/<int:pk>/",
+        views.memo_correspondence_detail,
+        name="memo_correspondence_detail",
+    ),
+    path(
+        "correspondence/memos/<int:pk>/template/",
+        views.memo_template_download,
+        name="memo_template_download",
+    ),
+    path(
+        "correspondence/memos/<int:pk>/signed-file/",
+        views.memo_signed_file_upload,
+        name="memo_signed_file_upload",
+    ),
     path("correspondence/outgoing/new/", views.outgoing_correspondence_create, name="outgoing_correspondence_create"),
     path(
         "correspondence/outgoing/<int:pk>/",

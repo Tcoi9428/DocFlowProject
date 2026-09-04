@@ -15,8 +15,10 @@ from django.utils import timezone
 from openpyxl import Workbook as OpenpyxlWorkbook
 
 from .correspondence import (
+    attach_generated_memo_template,
     attach_generated_outgoing_template,
     build_outgoing_letter_template,
+    build_service_memo_template,
     reserve_correspondence_number,
 )
 from .forms import DocumentForm
@@ -961,6 +963,171 @@ class IncomingCorrespondenceTests(TestCase):
         registry_response = self.client.get("/correspondence/incoming/?scope=all")
         self.assertContains(registry_response, "02-01-25")
         self.assertContains(registry_response, "Прикреплен")
+
+
+class MemoCorrespondenceTests(TestCase):
+    def setUp(self):
+        self.media_directory = TemporaryDirectory()
+        self.media_override = override_settings(MEDIA_ROOT=Path(self.media_directory.name))
+        self.media_override.enable()
+        self.addCleanup(self.media_override.disable)
+        self.addCleanup(self.media_directory.cleanup)
+
+        self.user = User.objects.create_user(
+            username="memo_registrar",
+            password="test",
+            first_name="Иван",
+            last_name="Иванов",
+        )
+        self.other_user = User.objects.create_user(username="memo_second", password="test")
+        self.department, _ = CorrespondenceDepartment.objects.update_or_create(
+            code="02",
+            defaults={"name": "Инжиниринг", "is_active": True},
+        )
+        CorrespondenceSequence.objects.update_or_create(
+            kind=CorrespondenceRecord.MEMO,
+            defaults={"next_number": 669},
+        )
+
+    def test_counter_can_be_lowered_and_reservation_uses_next_free_number(self):
+        CorrespondenceRecord.objects.create(
+            kind=CorrespondenceRecord.MEMO,
+            status=CorrespondenceRecord.REGISTERED,
+            sequence_number=687,
+            registration_number="03-02-687",
+            department=self.department,
+            subject="Некорректная старая запись",
+            executor=self.user,
+            created_by=self.user,
+        )
+        sequence = CorrespondenceSequence.objects.get(kind=CorrespondenceRecord.MEMO)
+        sequence.next_number = 669
+        sequence.full_clean()
+        sequence.save()
+
+        first = reserve_correspondence_number(self.user, CorrespondenceRecord.MEMO)
+        second = reserve_correspondence_number(self.other_user, CorrespondenceRecord.MEMO)
+
+        self.assertEqual(first.sequence_number, 669)
+        self.assertEqual(second.sequence_number, 670)
+
+    def test_registration_form_shows_number_date_and_template_notes(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get("/correspondence/memos/new/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Регистрация служебной записки")
+        self.assertContains(response, "03-__-669")
+        self.assertContains(response, f'value="{timezone.localdate():%Y-%m-%d}"', html=False)
+        self.assertContains(response, "автоматически попадет", count=4)
+        self.assertContains(response, 'data-searchable-select="true"', count=1)
+
+    def test_word_template_contains_memo_fields(self):
+        payload = build_service_memo_template(
+            "03-02-669",
+            date(2026, 9, 4),
+            "Об организации рабочих мест & графика",
+            "Иванов Иван Иванович",
+        )
+
+        with ZipFile(BytesIO(payload)) as document:
+            document_xml = document.read("word/document.xml")
+
+        word_namespace = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+        root = ET.fromstring(document_xml)
+        rows = list(root.iter(word_namespace + "tr"))
+        number_row_cells = rows[3].findall(word_namespace + "tc")
+        number_text = "".join(
+            (node.text or "") for node in number_row_cells[1].iter(word_namespace + "t")
+        )
+        date_text = "".join(
+            (node.text or "") for node in number_row_cells[3].iter(word_namespace + "t")
+        )
+        document_text = "".join((node.text or "") for node in root.iter(word_namespace + "t"))
+
+        self.assertEqual(number_text, "03-02-669")
+        self.assertEqual(date_text, "04.09.2026")
+        self.assertIn("Об организации рабочих мест & графика", document_text)
+        self.assertIn("Иванов Иван Иванович", document_text)
+        self.assertIn("Уважаемый Иванов Иван Иванович!", document_text)
+        self.assertNotIn("О…", document_text)
+        self.assertNotIn("…. ", document_text)
+
+    def test_template_download_and_registration_keep_draft_current(self):
+        record = reserve_correspondence_number(self.user, CorrespondenceRecord.MEMO)
+        self.client.force_login(self.user)
+
+        download_response = self.client.post(
+            f"/correspondence/memos/{record.pk}/template/",
+            {
+                "department": self.department.pk,
+                "registration_date": "2026-09-04",
+                "subject": "О первоначальном вопросе",
+                "addressee_person": "Петров Петр Петрович",
+            },
+        )
+        record.refresh_from_db()
+
+        self.assertEqual(download_response.status_code, 200)
+        self.assertEqual(record.registration_number, "03-02-669")
+        self.assertTrue(record.draft_file)
+        self.assertEqual(record.draft_original_name, "Служебная записка 03-02-669.docx")
+
+        registration_response = self.client.post(
+            "/correspondence/memos/new/",
+            {
+                "reservation_id": record.pk,
+                "department": self.department.pk,
+                "registration_date": "2026-09-04",
+                "subject": "Об актуальном вопросе",
+                "addressee_person": "Сидоров Сидор Сидорович",
+                "executor": self.user.pk,
+                "resolution": "Проверено",
+            },
+        )
+        record.refresh_from_db()
+
+        self.assertRedirects(registration_response, f"/correspondence/memos/{record.pk}/")
+        self.assertEqual(record.status, CorrespondenceRecord.REGISTERED)
+        self.assertEqual(record.subject, "Об актуальном вопросе")
+        self.assertFalse(record.has_signed_document)
+        with record.draft_file.open("rb") as draft_file:
+            with ZipFile(draft_file) as document:
+                document_xml = document.read("word/document.xml").decode("utf-8")
+        self.assertIn("Об актуальном вопросе", document_xml)
+        self.assertIn("Сидоров Сидор Сидорович", document_xml)
+        self.assertNotIn("первоначальном", document_xml)
+
+        registry_response = self.client.get("/correspondence/memos/?scope=all")
+        self.assertContains(registry_response, "03-02-669")
+        self.assertContains(registry_response, "Не прикреплен")
+        self.assertContains(registry_response, f"/correspondence/memos/{record.pk}/")
+
+    def test_signed_document_can_be_added_after_memo_registration(self):
+        record = CorrespondenceRecord.objects.create(
+            kind=CorrespondenceRecord.MEMO,
+            status=CorrespondenceRecord.REGISTERED,
+            sequence_number=669,
+            registration_number="03-02-669",
+            department=self.department,
+            subject="Служебная записка",
+            addressee_person="Петров П.П.",
+            executor=self.user,
+            created_by=self.user,
+        )
+        self.client.force_login(self.user)
+        uploaded_file = SimpleUploadedFile("memo-signed.pdf", b"signed", content_type="application/pdf")
+
+        response = self.client.post(
+            f"/correspondence/memos/{record.pk}/signed-file/",
+            {"signed_file": uploaded_file},
+        )
+        record.refresh_from_db()
+
+        self.assertRedirects(response, f"/correspondence/memos/{record.pk}/")
+        self.assertTrue(record.signed_file)
+        self.assertEqual(record.signed_original_name, "memo-signed.pdf")
 
 
 class CorrespondenceImportTests(TestCase):

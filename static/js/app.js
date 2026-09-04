@@ -226,51 +226,28 @@ document.addEventListener("DOMContentLoaded", function () {
         updateNumberPreview();
     });
 
-    const outgoingForm = document.querySelector("[data-outgoing-form]");
-    if (outgoingForm) {
-        const departmentSelect = outgoingForm.querySelector("#id_department");
-        const downloadButton = outgoingForm.querySelector("[data-template-download]");
-        const downloadStatus = outgoingForm.querySelector("[data-template-status]");
+    function setupTemplateDownload(form, requiredFields, fallbackFileName) {
+        if (!form) return;
+        const downloadButton = form.querySelector("[data-template-download]");
+        const downloadStatus = form.querySelector("[data-template-status]");
 
         downloadButton?.addEventListener("click", async function () {
-            const currentFormData = new FormData(outgoingForm);
-            const subjectInput = outgoingForm.elements.namedItem("subject");
-            const addresseeInput = outgoingForm.elements.namedItem("addressee");
-            const addresseePersonInput = outgoingForm.elements.namedItem("addressee_person");
-            const subject = String(currentFormData.get("subject") || "").trim();
-            const addressee = String(currentFormData.get("addressee") || "").trim();
-            const addresseePerson = String(currentFormData.get("addressee_person") || "").trim();
+            const currentFormData = new FormData(form);
+            const payload = new FormData();
 
-            if (!departmentSelect?.value) {
-                departmentSelect?.focus();
-                if (downloadStatus) downloadStatus.textContent = "Сначала выберите подразделение.";
-                return;
+            for (const field of requiredFields) {
+                const value = String(currentFormData.get(field.name) || "").trim();
+                if (!value) {
+                    form.elements.namedItem(field.name)?.focus();
+                    if (downloadStatus) downloadStatus.textContent = field.message;
+                    return;
+                }
+                payload.append(field.name, value);
             }
-            if (!subject) {
-                subjectInput?.focus();
-                if (downloadStatus) downloadStatus.textContent = "Сначала заполните поле «Наименование».";
-                return;
-            }
-            if (!addressee) {
-                addresseeInput?.focus();
-                if (downloadStatus) downloadStatus.textContent = "Сначала заполните поле «Адресат».";
-                return;
-            }
-            if (!addresseePerson) {
-                addresseePersonInput?.focus();
-                if (downloadStatus) downloadStatus.textContent = "Сначала заполните поле «Кому».";
-                return;
-            }
+            payload.append("csrfmiddlewaretoken", form.querySelector("[name=csrfmiddlewaretoken]").value);
 
             downloadButton.disabled = true;
             if (downloadStatus) downloadStatus.textContent = "Формируем бланк...";
-            const payload = new FormData();
-            payload.append("department", departmentSelect.value);
-            payload.append("subject", subject);
-            payload.append("addressee", addressee);
-            payload.append("addressee_person", addresseePerson);
-            payload.append("csrfmiddlewaretoken", outgoingForm.querySelector("[name=csrfmiddlewaretoken]").value);
-
             try {
                 const response = await fetch(downloadButton.dataset.url, { method: "POST", body: payload });
                 if (!response.ok) {
@@ -281,7 +258,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 const disposition = response.headers.get("Content-Disposition") || "";
                 const utfName = disposition.match(/filename\*=utf-8''([^;]+)/i);
                 const plainName = disposition.match(/filename="?([^";]+)"?/i);
-                const fileName = utfName ? decodeURIComponent(utfName[1]) : (plainName ? plainName[1] : "Исходящее письмо.docx");
+                const fileName = utfName ? decodeURIComponent(utfName[1]) : (plainName ? plainName[1] : fallbackFileName);
                 const url = URL.createObjectURL(blob);
                 const link = document.createElement("a");
                 link.href = url;
@@ -298,4 +275,25 @@ document.addEventListener("DOMContentLoaded", function () {
             }
         });
     }
+
+    setupTemplateDownload(
+        document.querySelector("[data-outgoing-form]"),
+        [
+            { name: "department", message: "Сначала выберите подразделение." },
+            { name: "subject", message: "Сначала заполните поле «Наименование»." },
+            { name: "addressee", message: "Сначала заполните поле «Адресат»." },
+            { name: "addressee_person", message: "Сначала заполните поле «Кому»." },
+        ],
+        "Исходящее письмо.docx"
+    );
+    setupTemplateDownload(
+        document.querySelector("[data-memo-form]"),
+        [
+            { name: "department", message: "Сначала выберите подразделение." },
+            { name: "registration_date", message: "Сначала укажите дату служебной записки." },
+            { name: "subject", message: "Сначала заполните поле «Наименование»." },
+            { name: "addressee_person", message: "Сначала заполните поле «Кому адресовано»." },
+        ],
+        "Служебная записка.docx"
+    );
 });

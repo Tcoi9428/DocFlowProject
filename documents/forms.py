@@ -181,6 +181,78 @@ class IncomingCorrespondenceForm(forms.ModelForm):
         return cleaned_data
 
 
+class MemoCorrespondenceForm(forms.ModelForm):
+    executor = UserModelChoiceField(
+        label="Исполнитель",
+        queryset=User.objects.none(),
+    )
+
+    class Meta:
+        model = CorrespondenceRecord
+        fields = [
+            "department",
+            "registration_date",
+            "subject",
+            "addressee_person",
+            "executor",
+            "resolution",
+            "signed_file",
+        ]
+        widgets = {
+            "registration_date": forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}),
+            "subject": forms.TextInput(attrs={"placeholder": "Например: Об организации рабочих мест"}),
+            "addressee_person": forms.TextInput(attrs={"placeholder": "ФИО адресата"}),
+            "resolution": forms.Textarea(attrs={"rows": 4, "placeholder": "Дополнительная информация"}),
+            "signed_file": forms.ClearableFileInput(
+                attrs={"accept": ".pdf,.doc,.docx,.jpg,.jpeg,.png"}
+            ),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["department"].queryset = CorrespondenceDepartment.objects.filter(is_active=True)
+        self.fields["department"].required = True
+        self.fields["department"].help_text = (
+            "Код подразделения автоматически войдет в номер черновика."
+        )
+        self.fields["registration_date"].input_formats = ["%Y-%m-%d"]
+        self.fields["registration_date"].help_text = "Дата автоматически попадет в черновик бланка."
+        self.fields["subject"].required = True
+        self.fields["subject"].help_text = (
+            "Наименование автоматически попадет в строку «О» черновика бланка."
+        )
+        self.fields["addressee_person"].label = "Кому адресовано"
+        self.fields["addressee_person"].required = True
+        self.fields["addressee_person"].help_text = (
+            "Текст автоматически попадет в адресный блок и обращение «Уважаемый» в черновике."
+        )
+        self.fields["executor"].queryset = (
+            User.objects.filter(is_active=True)
+            .select_related("userprofile")
+            .order_by("last_name", "first_name", "username")
+        )
+        self.fields["executor"].widget.attrs.update(
+            {
+                "data-searchable-select": "true",
+                "data-search-placeholder": "Поиск по ФИО или должности",
+            }
+        )
+        self.fields["resolution"].label = "Примечание"
+        self.fields["resolution"].required = False
+        self.fields["signed_file"].required = False
+        max_size_mb = settings.MAX_UPLOAD_SIZE // 1024 // 1024
+        self.fields["signed_file"].help_text = (
+            f"Можно прикрепить позднее. Максимальный размер файла — {max_size_mb} МБ."
+        )
+
+    def clean_signed_file(self):
+        uploaded_file = self.cleaned_data.get("signed_file")
+        if uploaded_file and uploaded_file.size > settings.MAX_UPLOAD_SIZE:
+            max_size_mb = settings.MAX_UPLOAD_SIZE // 1024 // 1024
+            raise ValidationError(f"Размер файла больше {max_size_mb} МБ.")
+        return uploaded_file
+
+
 class IncomingCorrespondenceFileForm(forms.ModelForm):
     class Meta:
         model = CorrespondenceRecord
