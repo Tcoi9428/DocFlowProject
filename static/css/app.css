@@ -1146,6 +1146,7 @@ button:hover,
 
 .table th,
 .table td {
+    min-width: 70px;
     border-bottom: 1px solid var(--soft-line);
     padding: 9px 8px;
     text-align: left;
