@@ -389,11 +389,9 @@ def approve_task(task, user, comment="", request=None):
 
 def _complete_parallel_cycle(document):
     document = Document.objects.select_for_update().get(pk=document.pk)
-    current_tasks = document.approval_tasks.filter(document_version=document.version)
-    if current_tasks.filter(status=ApprovalTask.PENDING).exists():
+    if document.approval_tasks.filter(status=ApprovalTask.PENDING).exists():
         return
     if document.revision_requests.filter(
-        document_version=document.version,
         status=RevisionRequest.OPEN,
     ).exists():
         document.status = Document.RETURNED

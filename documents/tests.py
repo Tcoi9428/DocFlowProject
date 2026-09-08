@@ -10,7 +10,9 @@ from django.contrib.auth.models import User
 from django.core import mail
 from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase, override_settings
+from django.db import connection
+from django.db.migrations.executor import MigrationExecutor
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 from openpyxl import Workbook as OpenpyxlWorkbook
 
@@ -49,6 +51,84 @@ from .services import (
     return_for_revision,
     start_approval,
 )
+
+
+class ExistingParallelRevisionMigrationTests(TransactionTestCase):
+    migrate_from = ("documents", "0015_attachment_versions")
+    migrate_to = ("documents", "0016_enable_existing_parallel_revisions")
+
+    def test_migration_enables_legacy_forms_and_preserves_workflow(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+        self.addCleanup(lambda: MigrationExecutor(connection).migrate([self.migrate_to]))
+        apps = executor.loader.project_state([self.migrate_from]).apps
+        OldUser = apps.get_model("auth", "User")
+        OldDocument = apps.get_model("documents", "Document")
+        OldType = apps.get_model("documents", "DocumentType")
+        OldTask = apps.get_model("documents", "ApprovalTask")
+        OldRevision = apps.get_model("documents", "RevisionRequest")
+        author = OldUser.objects.create(username="migration_author")
+        responsible = OldUser.objects.create(username="migration_responsible")
+        approver = OldUser.objects.create(username="migration_approver")
+        document_type = OldType.objects.create(name="Migration contract", code="MIG")
+        scenarios = [
+            ("on_approval", "parallel", False, "open", responsible.pk, True),
+            ("on_approval", "parallel", False, "open", None, True),
+            ("on_approval", "parallel", False, "resolved", responsible.pk, False),
+            ("on_approval", "parallel", False, None, responsible.pk, False),
+            ("on_approval", "sequential", False, "open", responsible.pk, False),
+            ("on_approval", "parallel", True, "open", responsible.pk, False),
+            ("approved", "parallel", False, "open", responsible.pk, False),
+            ("archived", "parallel", False, "open", responsible.pk, False),
+            ("draft", "parallel", False, "open", responsible.pk, False),
+            ("rejected", "parallel", False, "open", responsible.pk, False),
+            ("returned", "parallel", False, "open", responsible.pk, False),
+        ]
+        expected_documents = {}
+        affected_ids = []
+        for index, (status, mode, deleted, revision_status, owner_id, changed) in enumerate(scenarios):
+            document = OldDocument.objects.create(
+                document_type_id=document_type.pk, system_number=f"MIG-{index}",
+                title="Existing document", author_id=author.pk, responsible_id=owner_id,
+                status=status, approval_route_type=mode, is_deleted=deleted, version=2,
+            )
+            OldTask.objects.create(
+                document_id=document.pk, approver_id=responsible.pk,
+                status="pending", document_version=2, due_date=date(2026, 9, 10),
+            )
+            if revision_status:
+                task = OldTask.objects.create(
+                    document_id=document.pk, approver_id=approver.pk,
+                    status="returned", document_version=1, comment="Existing remark",
+                )
+                OldRevision.objects.create(
+                    document_id=document.pk, approval_task_id=task.pk,
+                    requested_by_id=approver.pk, document_version=1,
+                    comment="Existing remark", status=revision_status,
+                )
+            expected = OldDocument.objects.filter(pk=document.pk).values().get()
+            if changed:
+                affected_ids.append(document.pk)
+                expected["status"] = "returned"
+                expected["responsible_id"] = owner_id or author.pk
+            expected_documents[document.pk] = expected
+        tasks_before = list(OldTask.objects.order_by("pk").values())
+        remarks_before = list(OldRevision.objects.order_by("pk").values())
+
+        MigrationExecutor(connection).migrate([self.migrate_to])
+
+        for row in Document.objects.order_by("pk").values():
+            self.assertEqual(row, expected_documents[row["id"]])
+        self.assertEqual(list(ApprovalTask.objects.order_by("pk").values()), tasks_before)
+        self.assertEqual(list(RevisionRequest.objects.order_by("pk").values()), remarks_before)
+        for pk in affected_ids:
+            document = Document.objects.get(pk=pk)
+            self.client.force_login(document.responsible)
+            response = self.client.get(f"/documents/{pk}/")
+            self.assertEqual(response.status_code, 200)
+            self.assertContains(response, 'name="revision_request_id"')
+            self.assertContains(response, 'name="corrections"')
+            self.assertContains(response, 'name="file"')
 
 
 class DocumentWorkflowTests(TestCase):
@@ -359,6 +439,47 @@ class DocumentWorkflowTests(TestCase):
             self.assertContains(response, f'name="revision_request_id" value="{revision_request.pk}"')
         self.assertEqual(response.content.count(b'name="corrections"'), 2)
         self.assertEqual(response.content.count(b'name="file"'), 2)
+
+    def test_open_remark_from_previous_version_prevents_parallel_completion(self):
+        document = Document.objects.create(
+            document_type=self.document_type,
+            title="Independent corrections",
+            author=self.author,
+            responsible=self.author,
+            route=self.route,
+            approval_route_type=ApprovalRoute.PARALLEL,
+        )
+        start_approval(document, self.author)
+        for task in document.approval_tasks.all():
+            return_for_revision(task, task.approver, comment="Please revise")
+        first, second = list(document.revision_requests.order_by("id"))
+        _, retry_task = resubmit_parallel_approval(
+            document, self.author, first, "First correction",
+            SimpleUploadedFile("v2.pdf", b"version 2"),
+        )
+        approve_task(retry_task, retry_task.approver, "OK")
+        document.refresh_from_db()
+        second.refresh_from_db()
+
+        self.assertEqual(document.version, 2)
+        self.assertEqual(document.status, Document.RETURNED)
+        self.assertEqual(second.status, RevisionRequest.OPEN)
+        self.assertEqual(second.document_version, 1)
+        self.client.force_login(self.author)
+        response = self.client.get(f"/documents/{document.pk}/")
+        self.assertContains(response, f'name="revision_request_id" value="{second.pk}"')
+        self.assertFalse(Notification.objects.filter(
+            document=document, title__contains="согласован всеми участниками",
+        ).exists())
+
+        _, last_task = resubmit_parallel_approval(
+            document, self.author, second, "Second correction",
+            SimpleUploadedFile("v3.pdf", b"version 3"),
+        )
+        approve_task(last_task, last_task.approver, "OK")
+        document.refresh_from_db()
+        self.assertEqual(document.status, Document.APPROVED)
+        self.assertEqual(document.version, 3)
 
     def test_parallel_revision_response_requires_new_version_file(self):
         document = Document.objects.create(
