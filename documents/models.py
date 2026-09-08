@@ -577,6 +577,7 @@ class Attachment(TimeStampedModel):
     )
     file = models.FileField("Файл", upload_to=document_upload_path)
     original_name = models.CharField("Исходное имя файла", max_length=255)
+    document_version = models.PositiveIntegerField("Версия документа", default=1)
     size = models.PositiveBigIntegerField("Размер, байт", default=0)
     content_hash = models.CharField("Hash файла", max_length=64, blank=True)
     uploaded_by = models.ForeignKey(User, verbose_name="Кто загрузил", on_delete=models.PROTECT)
@@ -692,6 +693,14 @@ class RevisionRequest(TimeStampedModel):
     )
     resolved_at = models.DateTimeField("Дата исправления", null=True, blank=True)
     resolved_in_version = models.PositiveIntegerField("Исправлено в версии", null=True, blank=True)
+    resolution_attachment = models.ForeignKey(
+        Attachment,
+        verbose_name="Файл с исправлениями",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="resolved_revision_requests",
+    )
 
     class Meta:
         verbose_name = "Замечание по документу"

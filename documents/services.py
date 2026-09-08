@@ -1,3 +1,4 @@
+import hashlib
 import logging
 from datetime import timedelta
 from html import escape
@@ -12,6 +13,7 @@ from django.utils import timezone
 from .models import (
     ApprovalRoute,
     ApprovalTask,
+    Attachment,
     AuditLog,
     Document,
     DocumentComment,
@@ -37,6 +39,22 @@ def log_action(user, document, action, message, request=None):
         action=action,
         message=message,
         ip_address=ip_address or None,
+    )
+
+
+def create_document_attachment(document, user, uploaded_file, document_version=None):
+    file_hash = hashlib.sha256()
+    for chunk in uploaded_file.chunks():
+        file_hash.update(chunk)
+    uploaded_file.seek(0)
+    return Attachment.objects.create(
+        document=document,
+        file=uploaded_file,
+        original_name=uploaded_file.name,
+        document_version=document_version or document.version,
+        size=uploaded_file.size,
+        content_hash=file_hash.hexdigest(),
+        uploaded_by=user,
     )
 
 
@@ -410,11 +428,13 @@ def _record_parallel_revision(task, user, responsible, comment, request, task_st
         document.responsible = responsible
     elif not document.responsible_id:
         document.responsible = document.author
+    document.status = Document.RETURNED
     document.revision_requested_by = user
     document.revision_requested_at = timezone.now()
     document.revision_comment = comment
     document.save(
         update_fields=[
+            "status",
             "responsible",
             "revision_requested_by",
             "revision_requested_at",
@@ -434,6 +454,7 @@ def _record_parallel_revision(task, user, responsible, comment, request, task_st
             "resolved_by": None,
             "resolved_at": None,
             "resolved_in_version": None,
+            "resolution_attachment": None,
         },
     )
     DocumentComment.objects.create(
@@ -545,14 +566,14 @@ def return_for_revision(task, user, responsible=None, comment="", request=None):
 
 
 @transaction.atomic
-def resubmit_parallel_approval(document, user, corrections_by_request, request=None):
-    document.refresh_from_db(fields=["status", "version", "approval_route_type"])
+def resubmit_parallel_approval(document, user, revision_request, correction, uploaded_file, request=None):
+    document = Document.objects.select_for_update().select_related("author", "responsible").get(pk=document.pk)
     if _document_route_type(document) != ApprovalRoute.PARALLEL:
         raise ValueError("Повторная параллельная отправка доступна только для параллельного маршрута.")
     if document.status != Document.RETURNED:
-        raise ValueError("Документ еще не готов к повторной отправке.")
+        raise ValueError("Документ не находится на доработке.")
 
-    revision_requests = list(
+    revision_request = (
         document.revision_requests.select_for_update()
         .select_related(
             "approval_task",
@@ -561,13 +582,16 @@ def resubmit_parallel_approval(document, user, corrections_by_request, request=N
             "approval_task__approver",
             "requested_by",
         )
-        .filter(status=RevisionRequest.OPEN)
-        .order_by("created_at", "id")
+        .filter(pk=revision_request.pk, status=RevisionRequest.OPEN)
+        .first()
     )
-    if not revision_requests:
-        raise ValueError("Для документа нет открытых замечаний.")
-    if set(corrections_by_request) != {item.pk for item in revision_requests}:
-        raise ValueError("Необходимо описать корректировки по каждому замечанию.")
+    if revision_request is None:
+        raise ValueError("Это замечание уже обработано или относится к другому документу.")
+    correction = correction.strip()
+    if not correction:
+        raise ValueError("Опишите внесенные корректировки по замечанию.")
+    if not uploaded_file:
+        raise ValueError("Приложите файл новой версии документа.")
 
     participants = {document.author_id: document.author}
     if document.responsible_id:
@@ -576,10 +600,14 @@ def resubmit_parallel_approval(document, user, corrections_by_request, request=N
         participants[approval_task.approver_id] = approval_task.approver
 
     document.version += 1
-    document.status = Document.ON_APPROVAL
-    document.revision_requested_by = None
-    document.revision_requested_at = None
-    document.revision_comment = ""
+    has_other_open_requests = document.revision_requests.filter(status=RevisionRequest.OPEN).exclude(
+        pk=revision_request.pk
+    ).exists()
+    document.status = Document.RETURNED if has_other_open_requests else Document.ON_APPROVAL
+    if not has_other_open_requests:
+        document.revision_requested_by = None
+        document.revision_requested_at = None
+        document.revision_comment = ""
     document.save(
         update_fields=[
             "version",
@@ -591,58 +619,66 @@ def resubmit_parallel_approval(document, user, corrections_by_request, request=N
         ]
     )
 
-    correction_lines = []
-    retry_tasks = []
-    for revision_request in revision_requests:
-        correction = corrections_by_request[revision_request.pk].strip()
-        revision_request.status = RevisionRequest.RESOLVED
-        revision_request.resolution_comment = correction
-        revision_request.resolved_by = user
-        revision_request.resolved_at = timezone.now()
-        revision_request.resolved_in_version = document.version
-        revision_request.save(
-            update_fields=[
-                "status",
-                "resolution_comment",
-                "resolved_by",
-                "resolved_at",
-                "resolved_in_version",
-                "updated_at",
-            ]
-        )
-        correction_lines.append(
-            f"Замечание {user_identity(revision_request.requested_by)}: {revision_request.comment}\n"
-            f"Корректировки: {correction}"
-        )
+    now = timezone.now()
+    document.approval_tasks.filter(status=ApprovalTask.PENDING).update(
+        document_version=document.version,
+        updated_at=now,
+    )
+    attachment = create_document_attachment(
+        document,
+        user,
+        uploaded_file,
+        document_version=document.version,
+    )
 
-        previous_task = revision_request.approval_task
-        configured_approver = previous_task.configured_approver
-        if configured_approver is None:
-            configured_approver = document.configured_approvers.filter(
-                approver_id=previous_task.approver_id
-            ).order_by("order").first()
-        due_days = 3
-        if configured_approver:
-            due_days = configured_approver.due_days
-        elif previous_task.step_id:
-            due_days = previous_task.step.due_days
-        retry_tasks.append(
-            ApprovalTask.objects.create(
-                document=document,
-                step=previous_task.step,
-                configured_approver=configured_approver,
-                approver=previous_task.approver,
-                document_version=document.version,
-                due_date=timezone.localdate() + timedelta(days=due_days),
-            )
-        )
+    revision_request.status = RevisionRequest.RESOLVED
+    revision_request.resolution_comment = correction
+    revision_request.resolved_by = user
+    revision_request.resolved_at = now
+    revision_request.resolved_in_version = document.version
+    revision_request.resolution_attachment = attachment
+    revision_request.save(
+        update_fields=[
+            "status",
+            "resolution_comment",
+            "resolved_by",
+            "resolved_at",
+            "resolved_in_version",
+            "resolution_attachment",
+            "updated_at",
+        ]
+    )
 
-    correction_summary = "\n\n".join(correction_lines)
+    previous_task = revision_request.approval_task
+    configured_approver = previous_task.configured_approver
+    if configured_approver is None:
+        configured_approver = document.configured_approvers.filter(
+            approver_id=previous_task.approver_id
+        ).order_by("order").first()
+    due_days = 3
+    if configured_approver:
+        due_days = configured_approver.due_days
+    elif previous_task.step_id:
+        due_days = previous_task.step.due_days
+    retry_task = ApprovalTask.objects.create(
+        document=document,
+        step=previous_task.step,
+        configured_approver=configured_approver,
+        approver=previous_task.approver,
+        document_version=document.version,
+        due_date=timezone.localdate() + timedelta(days=due_days),
+    )
+
+    correction_summary = (
+        f"Замечание {user_identity(revision_request.requested_by)}: {revision_request.comment}\n"
+        f"Ответ: {correction}\n"
+        f"Файл версии {document.version}: {attachment.original_name}"
+    )
     DocumentComment.objects.create(
         document=document,
         author=user,
         text=(
-            f"Ответственным пользователем внесены правки. Версия документа: {document.version}.\n\n"
+            f"Ответственным пользователем устранено замечание. Версия документа: {document.version}.\n\n"
             f"{correction_summary}"
         ),
     )
@@ -650,7 +686,10 @@ def resubmit_parallel_approval(document, user, corrections_by_request, request=N
         user,
         document,
         AuditLog.UPDATE,
-        f"Замечания устранены. Создана версия {document.version}; повторное согласование направлено только авторам замечаний.",
+        (
+            f"Замечание пользователя {user_identity(revision_request.requested_by)} устранено. "
+            f"Создана версия {document.version} и приложен файл {attachment.original_name}."
+        ),
         request,
     )
 
@@ -661,8 +700,8 @@ def resubmit_parallel_approval(document, user, corrections_by_request, request=N
             f"Документ {document.system_number} обновлен до версии {document.version}",
             f"Ответственный {user_identity(user)} внес корректировки.\n\n{correction_summary}",
         )
-    for retry_task in retry_tasks:
-        notify_approval_required(retry_task.approver, document)
+    notify_approval_required(retry_task.approver, document)
+    return attachment, retry_task
 
 
 @transaction.atomic

@@ -1,4 +1,3 @@
-import hashlib
 import json
 from io import BytesIO
 
@@ -55,6 +54,7 @@ from .correspondence import (
 )
 from .services import (
     approve_task,
+    create_document_attachment,
     delegate_task,
     log_action,
     reject_task,
@@ -777,12 +777,15 @@ def document_detail(request, pk):
             "auditlog_set",
             "auditlog_set__user",
             "auditlog_set__user__userprofile",
+            "attachments",
+            "attachments__uploaded_by",
             "revision_requests",
             "revision_requests__requested_by",
             "revision_requests__requested_by__userprofile",
             "revision_requests__resolved_by",
             "revision_requests__resolved_by__userprofile",
             "revision_requests__approval_task",
+            "revision_requests__resolution_attachment",
         ),
         pk=pk,
     )
@@ -805,14 +808,15 @@ def document_detail(request, pk):
         document.status == Document.RETURNED and document.responsible_id == request.user.id
     )
     can_manage_attachments = can_edit_document
-    parallel_revision_form = None
     parallel_revision_items = []
     if document.approval_route_type == ApprovalRoute.PARALLEL and open_revision_requests:
-        parallel_revision_form = ParallelRevisionCorrectionForm(revision_requests=open_revision_requests)
         parallel_revision_items = [
             {
                 "revision_request": revision_request,
-                "field": parallel_revision_form[f"correction_{revision_request.pk}"],
+                "form": ParallelRevisionCorrectionForm(
+                    initial={"revision_request_id": revision_request.pk},
+                    auto_id=f"id_revision_{revision_request.pk}_%s",
+                ),
             }
             for revision_request in open_revision_requests
         ]
@@ -830,7 +834,6 @@ def document_detail(request, pk):
             "revision_form": revision_form,
             "open_revision_requests": open_revision_requests,
             "resolved_revision_requests": resolved_revision_requests,
-            "parallel_revision_form": parallel_revision_form,
             "parallel_revision_items": parallel_revision_items,
             "user_task": user_task,
             "can_work_on_revision": can_work_on_revision,
@@ -926,28 +929,43 @@ def resubmit_after_revision(request, pk):
 
     if request.method == "POST":
         if document.approval_route_type == ApprovalRoute.PARALLEL:
-            revision_requests = list(
-                document.revision_requests.select_related("requested_by", "requested_by__userprofile")
-                .filter(status=RevisionRequest.OPEN)
-                .order_by("created_at", "id")
-            )
-            form = ParallelRevisionCorrectionForm(request.POST, revision_requests=revision_requests)
+            form = ParallelRevisionCorrectionForm(request.POST, request.FILES)
             if form.is_valid():
+                revision_request = document.revision_requests.filter(
+                    pk=form.cleaned_data["revision_request_id"],
+                    status=RevisionRequest.OPEN,
+                ).first()
+                if revision_request is None:
+                    messages.error(request, "Замечание уже обработано или не найдено.")
+                    return redirect("documents:detail", pk=document.pk)
                 try:
                     resubmit_parallel_approval(
                         document,
                         request.user,
-                        form.corrections_by_request(),
+                        revision_request,
+                        form.cleaned_data["corrections"],
+                        form.cleaned_data["file"],
                         request,
                     )
-                    messages.success(
-                        request,
-                        "Создана новая версия. Повторное согласование направлено только участникам, оставившим замечания.",
-                    )
+                    document.refresh_from_db(fields=["version", "status"])
+                    if document.status == Document.RETURNED:
+                        success_message = (
+                            f"Замечание устранено, создана версия {document.version}. "
+                            "Ответьте на оставшиеся замечания."
+                        )
+                    else:
+                        success_message = (
+                            f"Замечание устранено, создана версия {document.version}. "
+                            "Документ направлен на повторное согласование."
+                        )
+                    messages.success(request, success_message)
                 except ValueError as exc:
                     messages.error(request, str(exc))
             else:
-                messages.error(request, "Опишите внесенные корректировки по каждому замечанию.")
+                messages.error(
+                    request,
+                    "Опишите внесенные корректировки и приложите файл новой версии.",
+                )
             return redirect("documents:detail", pk=document.pk)
 
         form = RevisionCorrectionForm(request.POST)
@@ -992,17 +1010,7 @@ def upload_attachment(request, pk):
         form = AttachmentForm(request.POST, request.FILES)
         if form.is_valid():
             uploaded_file = form.cleaned_data["file"]
-            file_hash = hashlib.sha256()
-            for chunk in uploaded_file.chunks():
-                file_hash.update(chunk)
-            uploaded_file.seek(0)
-            attachment = form.save(commit=False)
-            attachment.document = document
-            attachment.uploaded_by = request.user
-            attachment.original_name = uploaded_file.name
-            attachment.size = uploaded_file.size
-            attachment.content_hash = file_hash.hexdigest()
-            attachment.save()
+            attachment = create_document_attachment(document, request.user, uploaded_file)
             log_action(request.user, document, AuditLog.UPDATE, f"Загружен файл {attachment.original_name}.", request)
             messages.success(request, "Файл загружен.")
         else:

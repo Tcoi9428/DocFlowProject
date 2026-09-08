@@ -153,7 +153,7 @@ class ApprovalRouteAdmin(admin.ModelAdmin):
 class AttachmentInline(admin.TabularInline):
     model = Attachment
     extra = 0
-    readonly_fields = ["original_name", "size", "content_hash", "uploaded_by", "created_at"]
+    readonly_fields = ["original_name", "document_version", "size", "content_hash", "uploaded_by", "created_at"]
 
 
 class ApprovalTaskInline(admin.TabularInline):
@@ -192,9 +192,10 @@ class DocumentAdmin(admin.ModelAdmin):
 
 @admin.register(Attachment)
 class AttachmentAdmin(admin.ModelAdmin):
-    list_display = ["original_name", "document", "size", "uploaded_by", "created_at"]
+    list_display = ["original_name", "document", "document_version", "size", "uploaded_by", "created_at"]
+    list_filter = ["document_version", "created_at"]
     search_fields = ["original_name", "document__system_number", "content_hash"]
-    readonly_fields = ["content_hash", "size", "created_at", "updated_at"]
+    readonly_fields = ["content_hash", "size", "document_version", "created_at", "updated_at"]
 
 
 @admin.register(DocumentApprover)

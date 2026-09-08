@@ -26,6 +26,7 @@ from .models import (
     ApprovalRoute,
     ApprovalStep,
     ApprovalTask,
+    Attachment,
     ContractKind,
     CorrespondenceDepartment,
     CorrespondenceRecord,
@@ -52,6 +53,9 @@ from .services import (
 
 class DocumentWorkflowTests(TestCase):
     def setUp(self):
+        self.media_directory = TemporaryDirectory()
+        self.media_override = override_settings(MEDIA_ROOT=Path(self.media_directory.name))
+        self.media_override.enable()
         self.author = User.objects.create_user(username="author", password="test")
         self.manager = User.objects.create_user(username="manager", password="test")
         self.director = User.objects.create_user(username="director", password="test")
@@ -68,6 +72,11 @@ class DocumentWorkflowTests(TestCase):
         )
         ApprovalStep.objects.create(route=self.route, name="Руководитель", approver=self.manager, order=1)
         ApprovalStep.objects.create(route=self.route, name="Директор", approver=self.director, order=2)
+
+    def tearDown(self):
+        self.media_override.disable()
+        self.media_directory.cleanup()
+        super().tearDown()
 
     def test_system_number_is_generated_by_document_type_and_year(self):
         document = Document.objects.create(
@@ -187,7 +196,7 @@ class DocumentWorkflowTests(TestCase):
         document.refresh_from_db()
         director_task.refresh_from_db()
 
-        self.assertEqual(document.status, Document.ON_APPROVAL)
+        self.assertEqual(document.status, Document.RETURNED)
         self.assertEqual(director_task.status, ApprovalTask.PENDING)
         self.assertTrue(
             RevisionRequest.objects.filter(
@@ -202,6 +211,55 @@ class DocumentWorkflowTests(TestCase):
 
         self.assertEqual(document.status, Document.RETURNED)
         self.assertEqual(document.revision_requests.filter(status=RevisionRequest.OPEN).count(), 2)
+
+    def test_parallel_revision_can_be_resolved_before_other_decisions(self):
+        document = Document.objects.create(
+            document_type=self.document_type,
+            title="Немедленная доработка параллельного маршрута",
+            author=self.author,
+            responsible=self.author,
+            route=self.route,
+            approval_route_type=ApprovalRoute.PARALLEL,
+        )
+        DocumentApprover.objects.create(document=document, approver=self.manager, order=1)
+        DocumentApprover.objects.create(document=document, approver=self.director, order=2)
+        start_approval(document, self.author)
+        manager_task = ApprovalTask.objects.get(document=document, approver=self.manager)
+        director_task = ApprovalTask.objects.get(document=document, approver=self.director)
+        return_for_revision(manager_task, self.manager, comment="Исправить цену")
+        revision_request = document.revision_requests.get(status=RevisionRequest.OPEN)
+
+        attachment, retry_task = resubmit_parallel_approval(
+            document,
+            self.author,
+            revision_request,
+            "Цена исправлена и выделена в приложении.",
+            SimpleUploadedFile(
+                "contract-v2.docx",
+                b"document version 2",
+                content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
+        )
+        document.refresh_from_db()
+        director_task.refresh_from_db()
+        revision_request.refresh_from_db()
+
+        self.assertEqual(document.version, 2)
+        self.assertEqual(document.status, Document.ON_APPROVAL)
+        self.assertEqual(director_task.status, ApprovalTask.PENDING)
+        self.assertEqual(director_task.document_version, 2)
+        self.assertEqual(retry_task.approver, self.manager)
+        self.assertEqual(retry_task.document_version, 2)
+        self.assertEqual(attachment.document_version, 2)
+        self.assertEqual(revision_request.resolution_attachment, attachment)
+        self.assertIsNotNone(attachment.created_at)
+
+        self.client.force_login(self.author)
+        response = self.client.get(f"/documents/{document.pk}/")
+
+        self.assertContains(response, "contract-v2.docx")
+        self.assertContains(response, "Исправлено в версии 2")
+        self.assertContains(response, "Файл добавлен")
 
     def test_parallel_resubmit_targets_only_participants_with_comments(self):
         document = Document.objects.create(
@@ -221,10 +279,16 @@ class DocumentWorkflowTests(TestCase):
         return_for_revision(director_task, self.director, comment="Добавить срок поставки")
         revision_request = document.revision_requests.get(status=RevisionRequest.OPEN)
 
-        resubmit_parallel_approval(
+        attachment, retry_task = resubmit_parallel_approval(
             document,
             self.author,
-            {revision_request.pk: "Срок поставки добавлен в раздел 4."},
+            revision_request,
+            "Срок поставки добавлен в раздел 4.",
+            SimpleUploadedFile(
+                "contract-v2.docx",
+                b"document version 2",
+                content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
         )
         document.refresh_from_db()
         revision_request.refresh_from_db()
@@ -233,6 +297,9 @@ class DocumentWorkflowTests(TestCase):
         self.assertEqual(document.status, Document.ON_APPROVAL)
         self.assertEqual(revision_request.status, RevisionRequest.RESOLVED)
         self.assertEqual(revision_request.resolved_in_version, 2)
+        self.assertEqual(revision_request.resolution_attachment, attachment)
+        self.assertEqual(attachment.document_version, 2)
+        self.assertTrue(Attachment.objects.filter(pk=attachment.pk, document=document).exists())
         self.assertFalse(
             ApprovalTask.objects.filter(
                 document=document,
@@ -241,12 +308,9 @@ class DocumentWorkflowTests(TestCase):
                 status=ApprovalTask.PENDING,
             ).exists()
         )
-        retry_task = ApprovalTask.objects.get(
-            document=document,
-            approver=self.director,
-            document_version=2,
-            status=ApprovalTask.PENDING,
-        )
+        self.assertEqual(retry_task.approver, self.director)
+        self.assertEqual(retry_task.document_version, 2)
+        self.assertEqual(retry_task.status, ApprovalTask.PENDING)
         self.assertTrue(
             Notification.objects.filter(
                 recipient=self.manager,
@@ -288,11 +352,50 @@ class DocumentWorkflowTests(TestCase):
         response = self.client.get(f"/documents/{document.pk}/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Замечания к версии 1")
+        self.assertContains(response, "Открытые замечания")
         self.assertContains(response, "Исправить цену")
         self.assertContains(response, "Уточнить срок")
         for revision_request in revision_requests:
-            self.assertContains(response, f'name="correction_{revision_request.pk}"')
+            self.assertContains(response, f'name="revision_request_id" value="{revision_request.pk}"')
+        self.assertEqual(response.content.count(b'name="corrections"'), 2)
+        self.assertEqual(response.content.count(b'name="file"'), 2)
+
+    def test_parallel_revision_response_requires_new_version_file(self):
+        document = Document.objects.create(
+            document_type=self.document_type,
+            title="Доработка без файла",
+            author=self.author,
+            responsible=self.author,
+            route=self.route,
+            approval_route_type=ApprovalRoute.PARALLEL,
+        )
+        DocumentApprover.objects.create(document=document, approver=self.manager, order=1)
+        start_approval(document, self.author)
+        return_for_revision(
+            ApprovalTask.objects.get(document=document, approver=self.manager),
+            self.manager,
+            comment="Исправить цену",
+        )
+        revision_request = document.revision_requests.get(status=RevisionRequest.OPEN)
+        self.client.force_login(self.author)
+
+        response = self.client.post(
+            f"/documents/{document.pk}/resubmit/",
+            {
+                "revision_request_id": revision_request.pk,
+                "corrections": "Цена исправлена.",
+            },
+            follow=True,
+        )
+        document.refresh_from_db()
+        revision_request.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "приложите файл новой версии", html=False)
+        self.assertEqual(document.version, 1)
+        self.assertEqual(document.status, Document.RETURNED)
+        self.assertEqual(revision_request.status, RevisionRequest.OPEN)
+        self.assertFalse(Attachment.objects.filter(document=document).exists())
 
     def test_approval_recovers_missing_configured_approver_link(self):
         document = Document.objects.create(

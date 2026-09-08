@@ -461,25 +461,27 @@ class RevisionCorrectionForm(forms.Form):
 
 
 class ParallelRevisionCorrectionForm(forms.Form):
-    def __init__(self, *args, revision_requests, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.revision_requests = list(revision_requests)
-        for revision_request in self.revision_requests:
-            self.fields[f"correction_{revision_request.pk}"] = forms.CharField(
-                label="Внесенные корректировки",
-                widget=forms.Textarea(
-                    attrs={
-                        "rows": 3,
-                        "placeholder": "Опишите, что исправлено по этому замечанию",
-                    }
-                ),
-            )
+    revision_request_id = forms.IntegerField(widget=forms.HiddenInput())
+    corrections = forms.CharField(
+        label="Ответ по замечанию",
+        widget=forms.Textarea(
+            attrs={
+                "rows": 3,
+                "placeholder": "Опишите, что исправлено по этому замечанию",
+            }
+        ),
+    )
+    file = forms.FileField(
+        label="Новая версия документа",
+        help_text="Приложите файл с внесенными изменениями.",
+    )
 
-    def corrections_by_request(self):
-        return {
-            revision_request.pk: self.cleaned_data[f"correction_{revision_request.pk}"]
-            for revision_request in self.revision_requests
-        }
+    def clean_file(self):
+        uploaded_file = self.cleaned_data.get("file")
+        if uploaded_file and uploaded_file.size > settings.MAX_UPLOAD_SIZE:
+            max_size_mb = settings.MAX_UPLOAD_SIZE // 1024 // 1024
+            raise ValidationError(f"Размер файла больше {max_size_mb} МБ.")
+        return uploaded_file
 
 
 class ApprovalTaskFilterForm(forms.Form):

@@ -60,9 +60,14 @@
         <ul class="file-list">
             {% for attachment in document.attachments.all %}
                 <li>
-                    <span>
-                        <a href="{% url 'documents:download_attachment' document.pk attachment.pk %}">{{ attachment.original_name }}</a>
-                        <small>{{ attachment.size|filesizeformat }}</small>
+                    <span class="attachment-info">
+                        <span class="attachment-title-row">
+                            <a href="{% url 'documents:download_attachment' document.pk attachment.pk %}">{{ attachment.original_name }}</a>
+                            <span class="badge badge-blue">Версия {{ attachment.document_version }}</span>
+                        </span>
+                        <small class="attachment-meta">
+                            {{ attachment.size|filesizeformat }} · Добавлен {{ attachment.created_at|date:"d.m.Y H:i" }} · {{ attachment.uploaded_by|user_name }}
+                        </small>
                     </span>
                     {% if can_manage_attachments %}
                         <form method="post" action="{% url 'documents:delete_attachment' document.pk attachment.pk %}">
@@ -76,11 +81,15 @@
             {% endfor %}
         </ul>
         {% if can_manage_attachments %}
-            <form method="post" enctype="multipart/form-data" action="{% url 'documents:upload_attachment' document.pk %}" class="form compact">
-                {% csrf_token %}
-                {{ attachment_form.as_p }}
-                <button type="submit">{% if can_work_on_revision %}Загрузить заменяющий файл{% else %}Загрузить файл{% endif %}</button>
-            </form>
+            {% if document.approval_route_type == "parallel" and open_revision_requests %}
+                <p class="attachment-upload-note">Новую версию приложите в форме ответа на соответствующее замечание ниже.</p>
+            {% else %}
+                <form method="post" enctype="multipart/form-data" action="{% url 'documents:upload_attachment' document.pk %}" class="form compact">
+                    {% csrf_token %}
+                    {{ attachment_form.as_p }}
+                    <button type="submit">{% if can_work_on_revision %}Загрузить заменяющий файл{% else %}Загрузить файл{% endif %}</button>
+                </form>
+            {% endif %}
         {% endif %}
     </div>
 </section>
@@ -89,45 +98,51 @@
 <section class="panel revision-panel">
     <div class="revision-panel-header">
         <div>
-            <h2>Замечания к версии {{ document.version }}</h2>
-            <p>Каждое замечание обрабатывается отдельно. Уже согласовавшие участники повторно согласовывать документ не будут.</p>
+            <h2>Открытые замечания</h2>
+            <p>На каждое замечание ответьте отдельно и приложите новую версию документа. Остальные участники параллельного маршрута могут продолжать согласование.</p>
         </div>
         <span class="badge {% if document.status == 'returned' %}badge-warn{% endif %}">{{ document.get_status_display }}</span>
     </div>
-    {% if document.status == "on_approval" %}
-        <p class="revision-waiting-note">Ожидаются решения остальных участников параллельного маршрута. После завершения этапа ответственный сможет подтвердить корректировки.</p>
-    {% endif %}
 
     {% if can_work_on_revision %}
-        <form method="post" action="{% url 'documents:resubmit_after_revision' document.pk %}" class="form revision-form">
-            {% csrf_token %}
-            <div class="revision-request-grid">
-                {% for item in parallel_revision_items %}
-                    <article class="revision-request-card">
+        <div class="revision-request-grid">
+            {% for item in parallel_revision_items %}
+                <article class="revision-request-card">
+                    <div class="revision-request-meta">
+                        <strong>{% include "documents/partials/user_display.html" with person=item.revision_request.requested_by %}</strong>
+                        <span>К версии {{ item.revision_request.document_version }} · {{ item.revision_request.created_at|date:"d.m.Y H:i" }}</span>
+                    </div>
+                    <p class="revision-request-comment">{{ item.revision_request.comment|linebreaksbr }}</p>
+                    <form method="post" enctype="multipart/form-data" action="{% url 'documents:resubmit_after_revision' document.pk %}" class="form revision-form revision-request-form">
+                        {% csrf_token %}
+                        {{ item.form.revision_request_id }}
                         <div class="revision-request-meta">
-                            <strong>{% include "documents/partials/user_display.html" with person=item.revision_request.requested_by %}</strong>
-                            <span>{{ item.revision_request.created_at|date:"d.m.Y H:i" }}</span>
+                            {{ item.form.corrections.label_tag }}
                         </div>
-                        <p class="revision-request-comment">{{ item.revision_request.comment|linebreaksbr }}</p>
                         <div class="revision-correction-field">
-                            {{ item.field.label_tag }}
-                            {{ item.field }}
-                            {{ item.field.errors }}
+                            {{ item.form.corrections }}
+                            {{ item.form.corrections.errors }}
                         </div>
-                    </article>
-                {% endfor %}
-            </div>
-            <div class="actions">
-                <button class="primary" type="submit">Корректировки внесены, создать новую версию</button>
-            </div>
-        </form>
+                        <div class="revision-file-field">
+                            {{ item.form.file.label_tag }}
+                            {{ item.form.file }}
+                            {% if item.form.file.help_text %}<small>{{ item.form.file.help_text }}</small>{% endif %}
+                            {{ item.form.file.errors }}
+                        </div>
+                        <div class="actions">
+                            <button class="primary" type="submit">Устранить замечание и отправить новую версию</button>
+                        </div>
+                    </form>
+                </article>
+            {% endfor %}
+        </div>
     {% else %}
         <div class="revision-request-grid">
             {% for revision_request in open_revision_requests %}
                 <article class="revision-request-card">
                     <div class="revision-request-meta">
                         <strong>{% include "documents/partials/user_display.html" with person=revision_request.requested_by %}</strong>
-                        <span>{{ revision_request.created_at|date:"d.m.Y H:i" }}</span>
+                        <span>К версии {{ revision_request.document_version }} · {{ revision_request.created_at|date:"d.m.Y H:i" }}</span>
                     </div>
                     <p class="revision-request-comment">{{ revision_request.comment|linebreaksbr }}</p>
                 </article>
@@ -180,6 +195,12 @@
                 <div class="revision-resolution">
                     <strong>Исправлено в версии {{ revision_request.resolved_in_version }}</strong>
                     <p>{{ revision_request.resolution_comment|linebreaksbr }}</p>
+                    {% if revision_request.resolution_attachment %}
+                        <a class="revision-resolution-file" href="{% url 'documents:download_attachment' document.pk revision_request.resolution_attachment.pk %}">
+                            {{ revision_request.resolution_attachment.original_name }} · версия {{ revision_request.resolution_attachment.document_version }}
+                        </a>
+                        <small>Файл добавлен {{ revision_request.resolution_attachment.created_at|date:"d.m.Y H:i" }}</small>
+                    {% endif %}
                     <small>{% include "documents/partials/user_display.html" with person=revision_request.resolved_by %} · {{ revision_request.resolved_at|date:"d.m.Y H:i" }}</small>
                 </div>
             </article>

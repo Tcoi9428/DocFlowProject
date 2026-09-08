@@ -1105,6 +1105,61 @@ button:hover,
     width: 100%;
 }
 
+.revision-request-form {
+    display: grid;
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.revision-request-form .revision-request-meta {
+    display: block;
+}
+
+.revision-file-field {
+    display: grid;
+    gap: 6px;
+}
+
+.revision-file-field label,
+.revision-request-form label {
+    font-weight: 600;
+}
+
+.revision-file-field small,
+.attachment-meta {
+    color: #6b7785;
+}
+
+.revision-request-form .actions {
+    margin-top: 2px;
+}
+
+.attachment-info {
+    min-width: 0;
+}
+
+.attachment-title-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.attachment-title-row a {
+    overflow-wrap: anywhere;
+}
+
+.attachment-meta {
+    display: block;
+    margin-top: 4px;
+}
+
+.attachment-upload-note {
+    margin: 12px 0 0;
+    color: #526173;
+    font-size: 13px;
+}
+
 .revision-request-card.is-resolved {
     border-color: #b8d9c1;
 }
@@ -1120,7 +1175,14 @@ button:hover,
 }
 
 .revision-resolution small {
+    display: block;
     color: #6b7785;
+}
+
+.revision-resolution-file {
+    display: inline-block;
+    margin: 4px 0;
+    font-weight: 600;
 }
 
 .revision-form textarea {
