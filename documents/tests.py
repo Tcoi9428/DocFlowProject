@@ -131,6 +131,95 @@ class ExistingParallelRevisionMigrationTests(TransactionTestCase):
             self.assertContains(response, 'name="file"')
 
 
+class LegacyParallelRemarkMigrationTests(TransactionTestCase):
+    migrate_from = ("documents", "0016_enable_existing_parallel_revisions")
+    migrate_to = ("documents", "0017_restore_legacy_parallel_remarks")
+
+    def test_restores_only_current_unanswered_remarks(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+        self.addCleanup(lambda: MigrationExecutor(connection).migrate([self.migrate_to]))
+        apps = executor.loader.project_state([self.migrate_from]).apps
+        OldUser = apps.get_model("auth", "User")
+        OldDocument = apps.get_model("documents", "Document")
+        OldType = apps.get_model("documents", "DocumentType")
+        OldTask = apps.get_model("documents", "ApprovalTask")
+        OldRevision = apps.get_model("documents", "RevisionRequest")
+        owner = OldUser.objects.create(username="legacy_owner")
+        first_approver = OldUser.objects.create(username="legacy_first")
+        second_approver = OldUser.objects.create(username="legacy_second")
+        document_type = OldType.objects.create(name="Legacy contract", code="LGC")
+
+        def document(index, **fields):
+            return OldDocument.objects.create(
+                document_type_id=document_type.pk,
+                system_number=f"LGC-{index}",
+                title="Legacy remarks",
+                author_id=owner.pk,
+                responsible_id=owner.pk,
+                version=2,
+                status=fields.pop("status", "returned"),
+                approval_route_type=fields.pop("approval_route_type", "parallel"),
+                **fields,
+            )
+
+        target = document(1)
+        returned_at = timezone.now() - timedelta(days=1)
+        first = OldTask.objects.create(
+            document_id=target.pk, approver_id=first_approver.pk,
+            status="returned", document_version=2, comment="Fix price",
+            completed_at=returned_at,
+        )
+        second = OldTask.objects.create(
+            document_id=target.pk, approver_id=second_approver.pk,
+            status="rejected", document_version=2, comment="Fix dates",
+        )
+        OldTask.objects.create(
+            document_id=target.pk, approver_id=owner.pk,
+            status="returned", document_version=2, comment="",
+        )
+        OldTask.objects.create(
+            document_id=target.pk, approver_id=owner.pk,
+            status="returned", document_version=1, comment="Old remark",
+        )
+        sequential = document(2, approval_route_type="sequential")
+        OldTask.objects.create(
+            document_id=sequential.pk, approver_id=first_approver.pk,
+            status="returned", document_version=2, comment="Sequential remark",
+        )
+        already_open = document(3)
+        existing_task = OldTask.objects.create(
+            document_id=already_open.pk, approver_id=first_approver.pk,
+            status="returned", document_version=2, comment="Already open",
+        )
+        OldRevision.objects.create(
+            document_id=already_open.pk, approval_task_id=existing_task.pk,
+            requested_by_id=first_approver.pk, document_version=2,
+            comment="Already open", status="open",
+        )
+        deleted = document(4, is_deleted=True)
+        OldTask.objects.create(
+            document_id=deleted.pk, approver_id=first_approver.pk,
+            status="returned", document_version=2, comment="Deleted remark",
+        )
+
+        MigrationExecutor(connection).migrate([self.migrate_to])
+
+        remarks = list(RevisionRequest.objects.filter(document_id=target.pk).order_by("id"))
+        self.assertEqual([remark.approval_task_id for remark in remarks], [first.pk, second.pk])
+        self.assertEqual([remark.comment for remark in remarks], ["Fix price", "Fix dates"])
+        self.assertEqual(remarks[0].created_at, returned_at)
+        self.assertFalse(RevisionRequest.objects.filter(document_id=sequential.pk).exists())
+        self.assertEqual(RevisionRequest.objects.filter(document_id=already_open.pk).count(), 1)
+        self.assertFalse(RevisionRequest.objects.filter(document_id=deleted.pk).exists())
+
+        self.client.force_login(User.objects.get(pk=owner.pk))
+        response = self.client.get(f"/documents/{target.pk}/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'name="revision_request_id"', count=2)
+        self.assertContains(response, 'name="file"', count=2)
+
+
 class DocumentWorkflowTests(TestCase):
     def setUp(self):
         self.media_directory = TemporaryDirectory()

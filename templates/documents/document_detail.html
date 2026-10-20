@@ -150,6 +150,11 @@
         </div>
     {% endif %}
 </section>
+{% elif can_work_on_revision and document.approval_route_type == "parallel" %}
+<section class="panel revision-panel">
+    <h2>Документ на доработке</h2>
+    <p>Для этого документа не удалось найти отдельные замечания согласующих. Обратитесь к администратору: проверьте задачи согласования и миграции базы данных.</p>
+</section>
 {% elif can_work_on_revision %}
 <section class="panel revision-panel">
     <h2>Документ на доработке</h2>
