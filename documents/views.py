@@ -197,7 +197,18 @@ def document_form_context(form, title, selected_type_id="", document=None):
         }
 
     configured_approvers = []
-    if document:
+    if form.is_bound:
+        for name, user_id, due_days in zip(
+            form.data.getlist("approver_name"),
+            form.data.getlist("approver_user"),
+            form.data.getlist("approver_due_days"),
+        ):
+            configured_approvers.append({
+                "name": name,
+                "approver_id": int(user_id) if user_id.isdigit() else None,
+                "due_days": due_days,
+            })
+    elif document:
         configured_approvers = list(document.configured_approvers.select_related("approver", "approver__userprofile").order_by("order"))
 
     return {

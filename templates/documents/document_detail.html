@@ -34,6 +34,7 @@
             <dt>Статус</dt><dd>{{ document.get_status_display }}</dd>
             <dt>Версия</dt><dd>Версия {{ document.version }}</dd>
             <dt>Тип согласования</dt><dd>{{ document.get_approval_route_type_display }}</dd>
+            {% if document.requires_general_director_approval %}<dt>Финальное согласование</dt><dd>Генеральный директор: {% include "documents/partials/user_display.html" with person=document.general_director %}</dd>{% endif %}
             <dt>Внутренний номер</dt><dd>{{ document.internal_number|default:"-" }}</dd>
             <dt>Инициатор</dt><dd>{% include "documents/partials/user_display.html" with person=document.author %}</dd>
             <dt>Ответственный</dt><dd>{% include "documents/partials/user_display.html" with person=document.responsible %}</dd>

@@ -309,6 +309,8 @@ class DocumentForm(forms.ModelForm):
             "department",
             "route",
             "approval_route_type",
+            "requires_general_director_approval",
+            "general_director",
             "registration_date",
             "due_date",
             "amount",
@@ -329,6 +331,12 @@ class DocumentForm(forms.ModelForm):
             queryset=User.objects.filter(is_active=True).select_related("userprofile").order_by("last_name", "first_name", "username"),
             required=False,
             label=self.fields["responsible"].label,
+        )
+        self.fields["general_director"] = UserModelChoiceField(
+            queryset=User.objects.filter(is_active=True, userprofile__is_general_director=True).select_related("userprofile").order_by("last_name", "first_name", "username"),
+            required=False,
+            label="Генеральный директор",
+            widget=forms.Select(attrs={"data-searchable-select": "true"}),
         )
         self.fields["contract_kind"].queryset = ContractKind.objects.filter(is_active=True)
         self.fields["document_purpose"].queryset = DocumentPurpose.objects.filter(is_active=True)
@@ -387,6 +395,14 @@ class DocumentForm(forms.ModelForm):
         cleaned_data = super().clean()
         route = cleaned_data.get("route")
         document_type = cleaned_data.get("document_type")
+        if cleaned_data.get("approval_route_type") != ApprovalRoute.PARALLEL:
+            cleaned_data["requires_general_director_approval"] = False
+            cleaned_data["general_director"] = None
+        elif cleaned_data.get("requires_general_director_approval"):
+            if not cleaned_data.get("general_director"):
+                self.add_error("general_director", "Выберите генерального директора для финального согласования.")
+        else:
+            cleaned_data["general_director"] = None
         if route and document_type and route.document_type_id != document_type.id:
             self.add_error("route", "Маршрут должен соответствовать выбранному типу документа.")
         if document_type and document_type.code != "DOG":

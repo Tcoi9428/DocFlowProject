@@ -26,6 +26,8 @@ class Command(BaseCommand):
         admin_user.save()
 
         director = self._user("director", "Директор", "company.local")
+        director.userprofile.is_general_director = True
+        director.userprofile.save(update_fields=["is_general_director"])
         manager = self._user("manager", "Руководитель отдела", "company.local")
         accountant = self._user("accountant", "Бухгалтер", "company.local")
         initiator = self._user("user", "Инициатор", "company.local")

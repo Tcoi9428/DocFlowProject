@@ -840,6 +840,33 @@ p {
     accent-color: var(--accent);
 }
 
+.director-settings {
+    margin: 0 16px;
+    border-bottom: 1px solid var(--soft-line);
+}
+
+.director-settings[hidden],
+.director-settings .inline-field[hidden] {
+    display: none;
+}
+
+.director-toggle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 0;
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.director-toggle input {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    accent-color: var(--accent);
+}
+
 .form-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));

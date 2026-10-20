@@ -53,6 +53,7 @@ class UserProfile(TimeStampedModel):
     )
     patronymic = models.CharField("Отчество", max_length=150, blank=True)
     position = models.CharField("Должность", max_length=150, blank=True)
+    is_general_director = models.BooleanField("Генеральный директор", default=False)
     phone = models.CharField("Телефон", max_length=50, blank=True)
 
     class Meta:
@@ -478,6 +479,17 @@ class Document(TimeStampedModel):
         choices=ApprovalRoute.ROUTE_TYPES,
         default=ApprovalRoute.SEQUENTIAL,
     )
+    requires_general_director_approval = models.BooleanField(
+        "Требуется согласование генерального директора", default=False
+    )
+    general_director = models.ForeignKey(
+        User,
+        verbose_name="Генеральный директор",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="documents_for_final_approval",
+    )
     version = models.PositiveIntegerField("Версия", default=1)
     revision_requested_by = models.ForeignKey(
         User,
@@ -625,6 +637,7 @@ class ApprovalTask(TimeStampedModel):
     )
     approver = models.ForeignKey(User, verbose_name="Согласующий", on_delete=models.PROTECT, related_name="approval_tasks")
     document_version = models.PositiveIntegerField("Версия документа", default=1)
+    is_final_director_approval = models.BooleanField("Финальное согласование директора", default=False)
     status = models.CharField("Статус", max_length=20, choices=STATUSES, default=PENDING)
     due_date = models.DateField("Срок", null=True, blank=True)
     reminder_sent_at = models.DateTimeField("Напоминание отправлено", null=True, blank=True)

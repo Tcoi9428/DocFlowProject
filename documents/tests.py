@@ -45,6 +45,8 @@ from .models import (
 )
 from .services import (
     approve_task,
+    delegate_task,
+    reject_task,
     deliver_email,
     process_approval_reminders,
     resubmit_parallel_approval,
@@ -55,7 +57,7 @@ from .services import (
 
 class ExistingParallelRevisionMigrationTests(TransactionTestCase):
     migrate_from = ("documents", "0015_attachment_versions")
-    migrate_to = ("documents", "0016_enable_existing_parallel_revisions")
+    migrate_to = ("documents", "0019_general_director_profile_flag")
 
     def test_migration_enables_legacy_forms_and_preserves_workflow(self):
         executor = MigrationExecutor(connection)
@@ -117,9 +119,12 @@ class ExistingParallelRevisionMigrationTests(TransactionTestCase):
 
         MigrationExecutor(connection).migrate([self.migrate_to])
 
-        for row in Document.objects.order_by("pk").values():
-            self.assertEqual(row, expected_documents[row["id"]])
-        self.assertEqual(list(ApprovalTask.objects.order_by("pk").values()), tasks_before)
+        for pk, expected in expected_documents.items():
+            self.assertEqual(Document.objects.filter(pk=pk).values(*expected.keys()).get(), expected)
+        self.assertEqual(
+            list(ApprovalTask.objects.order_by("pk").values(*tasks_before[0].keys())),
+            tasks_before,
+        )
         self.assertEqual(list(RevisionRequest.objects.order_by("pk").values()), remarks_before)
         for pk in affected_ids:
             document = Document.objects.get(pk=pk)
@@ -133,7 +138,7 @@ class ExistingParallelRevisionMigrationTests(TransactionTestCase):
 
 class LegacyParallelRemarkMigrationTests(TransactionTestCase):
     migrate_from = ("documents", "0016_enable_existing_parallel_revisions")
-    migrate_to = ("documents", "0017_restore_legacy_parallel_remarks")
+    migrate_to = ("documents", "0019_general_director_profile_flag")
 
     def test_restores_only_current_unanswered_remarks(self):
         executor = MigrationExecutor(connection)
@@ -228,6 +233,8 @@ class DocumentWorkflowTests(TestCase):
         self.author = User.objects.create_user(username="author", password="test")
         self.manager = User.objects.create_user(username="manager", password="test")
         self.director = User.objects.create_user(username="director", password="test")
+        self.director.userprofile.is_general_director = True
+        self.director.userprofile.save(update_fields=["is_general_director"])
         self.document_type = DocumentType.objects.create(name="Договоры", code="DOG")
         self.memo_type = DocumentType.objects.create(name="Служебные записки", code="SZ")
         self.order_type = DocumentType.objects.create(name="Приказы", code="PRK")
@@ -345,6 +352,234 @@ class DocumentWorkflowTests(TestCase):
             ).count(),
             2,
         )
+
+    def test_final_director_is_not_notified_until_parallel_approvers_finish(self):
+        lawyer = User.objects.create_user(username="lawyer", password="test")
+        document = Document.objects.create(
+            document_type=self.document_type,
+            title="Договор с финальным утверждением",
+            author=self.author,
+            responsible=self.author,
+            route=self.route,
+            approval_route_type=ApprovalRoute.PARALLEL,
+            requires_general_director_approval=True,
+            general_director=self.director,
+        )
+        DocumentApprover.objects.create(document=document, approver=self.manager, order=1)
+        DocumentApprover.objects.create(document=document, approver=lawyer, order=2)
+        DocumentApprover.objects.create(document=document, approver=self.director, order=3, due_days=5)
+
+        start_approval(document, self.author)
+        self.assertEqual(document.approval_tasks.filter(status=ApprovalTask.PENDING).count(), 2)
+        self.assertFalse(document.approval_tasks.filter(approver=self.director).exists())
+        self.assertFalse(Notification.objects.filter(
+            document=document, recipient=self.director, notification_type=Notification.APPROVAL_REQUIRED,
+        ).exists())
+
+        approve_task(document.approval_tasks.get(approver=self.manager), self.manager)
+        document.refresh_from_db()
+        self.assertEqual(document.status, Document.ON_APPROVAL)
+        self.assertFalse(document.approval_tasks.filter(approver=self.director).exists())
+
+        approve_task(document.approval_tasks.get(approver=lawyer), lawyer)
+        document.refresh_from_db()
+        final_task = document.approval_tasks.get(approver=self.director)
+        self.assertEqual(document.status, Document.ON_APPROVAL)
+        self.assertTrue(final_task.is_final_director_approval)
+        self.assertEqual(final_task.due_date, timezone.localdate() + timedelta(days=5))
+        self.assertTrue(Notification.objects.filter(
+            document=document, recipient=self.director, notification_type=Notification.APPROVAL_REQUIRED,
+        ).exists())
+
+        approve_task(final_task, self.director)
+        document.refresh_from_db()
+        self.assertEqual(document.status, Document.APPROVED)
+
+    def test_parallel_remark_delays_final_director_and_only_retries_author(self):
+        document = Document.objects.create(
+            document_type=self.document_type,
+            title="Договор с замечанием",
+            author=self.author,
+            responsible=self.author,
+            approval_route_type=ApprovalRoute.PARALLEL,
+            requires_general_director_approval=True,
+            general_director=self.director,
+        )
+        DocumentApprover.objects.create(document=document, approver=self.manager, order=1)
+        DocumentApprover.objects.create(document=document, approver=self.director, order=2)
+        start_approval(document, self.author)
+        return_for_revision(document.approval_tasks.get(approver=self.manager), self.manager, comment="Исправить цену")
+        self.assertFalse(document.approval_tasks.filter(approver=self.director).exists())
+
+        _, retry_task = resubmit_parallel_approval(
+            document, self.author, document.revision_requests.get(status=RevisionRequest.OPEN),
+            "Цена исправлена", SimpleUploadedFile("v2.pdf", b"version 2"),
+        )
+        self.assertFalse(retry_task.is_final_director_approval)
+        self.assertFalse(document.approval_tasks.filter(approver=self.director).exists())
+        approve_task(retry_task, self.manager)
+        final_task = document.approval_tasks.get(approver=self.director)
+        self.assertTrue(final_task.is_final_director_approval)
+
+        reject_task(final_task, self.director, comment="Уточнить срок")
+        document.refresh_from_db()
+        self.assertEqual(document.status, Document.RETURNED)
+        _, director_retry = resubmit_parallel_approval(
+            document, self.author, document.revision_requests.get(status=RevisionRequest.OPEN),
+            "Срок уточнён", SimpleUploadedFile("v3.pdf", b"version 3"),
+        )
+        self.assertTrue(director_retry.is_final_director_approval)
+        self.assertEqual(director_retry.approver, self.director)
+        self.assertFalse(document.approval_tasks.filter(
+            approver=self.manager, status=ApprovalTask.PENDING,
+        ).exists())
+        approve_task(director_retry, self.director)
+        document.refresh_from_db()
+        self.assertEqual(document.status, Document.APPROVED)
+
+    def test_final_director_task_can_be_delegated(self):
+        document = Document.objects.create(
+            document_type=self.document_type,
+            title="Договор с делегированием директора",
+            author=self.author,
+            approval_route_type=ApprovalRoute.PARALLEL,
+            requires_general_director_approval=True,
+            general_director=self.director,
+        )
+        DocumentApprover.objects.create(document=document, approver=self.manager, order=1)
+        start_approval(document, self.author)
+        approve_task(document.approval_tasks.get(approver=self.manager), self.manager)
+        final_task = document.approval_tasks.get(approver=self.director)
+        delegate_task(final_task, self.director, self.manager)
+        delegated_task = document.approval_tasks.get(approver=self.manager, status=ApprovalTask.PENDING)
+        self.assertTrue(delegated_task.is_final_director_approval)
+        approve_task(delegated_task, self.manager)
+        document.refresh_from_db()
+        self.assertEqual(document.status, Document.APPROVED)
+
+    def test_final_director_requires_a_distinct_prior_approver(self):
+        document = Document.objects.create(
+            document_type=self.document_type,
+            title="Директор без других согласующих",
+            author=self.author,
+            approval_route_type=ApprovalRoute.PARALLEL,
+            requires_general_director_approval=True,
+            general_director=self.director,
+        )
+        DocumentApprover.objects.create(document=document, approver=self.director, order=1)
+        with self.assertRaisesMessage(ValueError, "Добавьте хотя бы одного согласующего"):
+            start_approval(document, self.author)
+        document.refresh_from_db()
+        self.assertEqual(document.status, Document.DRAFT)
+        self.assertFalse(document.approval_tasks.exists())
+
+    def test_director_checkbox_requires_user_for_parallel_route(self):
+        form = DocumentForm(data={
+            "document_type": self.document_type.pk,
+            "title": "Договор без директора",
+            "registration_date": timezone.localdate().isoformat(),
+            "approval_route_type": ApprovalRoute.PARALLEL,
+            "requires_general_director_approval": "on",
+        })
+        self.assertFalse(form.is_valid())
+        self.assertIn("general_director", form.errors)
+
+    def test_unmarked_user_cannot_be_selected_as_general_director(self):
+        form = DocumentForm(data={
+            "document_type": self.document_type.pk,
+            "title": "Договор с неверным директором",
+            "registration_date": timezone.localdate().isoformat(),
+            "approval_route_type": ApprovalRoute.PARALLEL,
+            "requires_general_director_approval": "on",
+            "general_director": self.manager.pk,
+        })
+        self.assertFalse(form.is_valid())
+        self.assertIn("general_director", form.errors)
+
+        document = Document.objects.create(
+            document_type=self.document_type,
+            title="Некорректный маршрут",
+            author=self.author,
+            approval_route_type=ApprovalRoute.PARALLEL,
+            requires_general_director_approval=True,
+            general_director=self.manager,
+        )
+        DocumentApprover.objects.create(document=document, approver=self.director, order=1)
+        with self.assertRaisesMessage(ValueError, "назначенного в профиле"):
+            start_approval(document, self.author)
+
+    def test_director_form_error_preserves_entered_approvers(self):
+        self.client.force_login(self.author)
+        response = self.client.post("/documents/new/", {
+            "document_type": self.document_type.pk,
+            "title": "Договор с финальным согласованием",
+            "registration_date": timezone.localdate().isoformat(),
+            "approval_route_type": ApprovalRoute.PARALLEL,
+            "requires_general_director_approval": "on",
+            "approver_name": ["Проверка руководителем"],
+            "approver_user": [str(self.manager.pk)],
+            "approver_due_days": ["4"],
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Выберите генерального директора")
+        self.assertContains(response, 'value="Проверка руководителем"')
+        self.assertContains(response, f'<option value="{self.manager.pk}" selected')
+
+    def test_create_document_saves_final_director_from_form(self):
+        self.client.force_login(self.author)
+        response = self.client.post("/documents/new/", {
+            "document_type": self.document_type.pk,
+            "title": "Договор с директором",
+            "registration_date": timezone.localdate().isoformat(),
+            "approval_route_type": ApprovalRoute.PARALLEL,
+            "requires_general_director_approval": "on",
+            "general_director": self.director.pk,
+            "approver_name": ["Руководитель", "Генеральный директор"],
+            "approver_user": [str(self.manager.pk), str(self.director.pk)],
+            "approver_due_days": ["3", "5"],
+        })
+        self.assertEqual(response.status_code, 302)
+        document = Document.objects.get(title="Договор с директором")
+        self.assertTrue(document.requires_general_director_approval)
+        self.assertEqual(document.general_director, self.director)
+        self.assertEqual(document.configured_approvers.count(), 2)
+
+        start_approval(document, self.author)
+        self.assertEqual(document.approval_tasks.filter(status=ApprovalTask.PENDING).count(), 1)
+        self.assertFalse(document.approval_tasks.filter(approver=self.director).exists())
+
+    def test_final_director_works_with_route_template_without_custom_rows(self):
+        document = Document.objects.create(
+            document_type=self.document_type,
+            title="Договор по шаблону",
+            author=self.author,
+            route=self.route,
+            approval_route_type=ApprovalRoute.PARALLEL,
+            requires_general_director_approval=True,
+            general_director=self.director,
+        )
+        start_approval(document, self.author)
+        self.assertEqual(document.approval_tasks.filter(status=ApprovalTask.PENDING).count(), 1)
+        self.assertFalse(document.approval_tasks.filter(approver=self.director).exists())
+
+        approve_task(document.approval_tasks.get(approver=self.manager), self.manager)
+        final_task = document.approval_tasks.get(approver=self.director)
+        self.assertTrue(final_task.is_final_director_approval)
+        self.assertEqual(final_task.step.name, "Директор")
+
+    def test_sequential_route_ignores_director_checkbox(self):
+        form = DocumentForm(data={
+            "document_type": self.document_type.pk,
+            "title": "Последовательный договор",
+            "registration_date": timezone.localdate().isoformat(),
+            "approval_route_type": ApprovalRoute.SEQUENTIAL,
+            "requires_general_director_approval": "on",
+            "general_director": self.director.pk,
+        })
+        self.assertTrue(form.is_valid(), form.errors)
+        document = form.save(commit=False)
+        self.assertFalse(document.requires_general_director_approval)
+        self.assertIsNone(document.general_director)
 
     def test_parallel_return_does_not_block_other_approvers(self):
         document = Document.objects.create(

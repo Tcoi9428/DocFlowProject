@@ -35,9 +35,9 @@ class DepartmentAdmin(admin.ModelAdmin):
 
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
-    list_display = ["user", "patronymic", "department", "position", "phone"]
+    list_display = ["user", "patronymic", "department", "position", "is_general_director", "phone"]
     search_fields = ["user__username", "user__first_name", "user__last_name", "patronymic", "position"]
-    list_filter = ["department"]
+    list_filter = ["department", "is_general_director"]
 
 
 @admin.register(CorrespondenceDepartment)
@@ -183,7 +183,7 @@ class DocumentAdmin(admin.ModelAdmin):
     fieldsets = [
         ("Регистрация", {"fields": ["document_type", "title", "system_number", "internal_number", "status"]}),
         ("Договор", {"fields": ["contract_kind", "document_purpose"]}),
-        ("Ответственные", {"fields": ["author", "responsible", "department", "route", "approval_route_type"]}),
+        ("Ответственные", {"fields": ["author", "responsible", "department", "route", "approval_route_type", "requires_general_director_approval", "general_director"]}),
         ("Сроки и реквизиты", {"fields": ["registration_date", "due_date", "amount", "counterparty"]}),
         ("Содержание", {"fields": ["summary", "custom_data"]}),
         ("Служебное", {"fields": ["is_deleted", "archived_at", "created_at", "updated_at"]}),

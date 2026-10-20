@@ -15,7 +15,7 @@
             {% for task in tasks %}
                 <tr>
                     <td data-label="Документ"><a href="{% url 'documents:detail' task.document.pk %}">{{ task.document.system_number }}</a><br>{{ task.document.title }}</td>
-                    <td data-label="Текущий этап">{% if task.configured_approver %}{{ task.configured_approver.name }}{% elif task.step %}{{ task.step.name }}{% else %}-{% endif %}</td>
+                    <td data-label="Текущий этап">{% if task.is_final_director_approval %}Финальное согласование генерального директора{% elif task.configured_approver %}{{ task.configured_approver.name }}{% elif task.step %}{{ task.step.name }}{% else %}-{% endif %}</td>
                     <td data-label="Версия">{{ task.document_version }}</td>
                     <td data-label="Ответственный">{% include "documents/partials/user_display.html" with person=task.approver %}</td>
                     <td data-label="Срок" class="{% if task.is_overdue %}danger-text{% endif %}">{{ task.due_date|date:"d.m.Y"|default:"-" }}</td>

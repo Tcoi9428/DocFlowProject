@@ -20,6 +20,7 @@ from .models import (
     EmailDelivery,
     Notification,
     RevisionRequest,
+    UserProfile,
 )
 from .user_display import user_identity
 
@@ -275,6 +276,16 @@ def start_approval(document, user, request=None):
     if not route and not configured_approvers:
         raise ValueError("Для документа не выбран и не настроен маршрут согласования.")
 
+    is_parallel = _document_route_type(document) == ApprovalRoute.PARALLEL
+    if is_parallel and document.requires_general_director_approval:
+        if not document.general_director_id or not document.general_director.is_active or not UserProfile.objects.filter(
+            user_id=document.general_director_id, is_general_director=True
+        ).exists():
+            raise ValueError("Выберите генерального директора, назначенного в профиле пользователя.")
+        participants = configured_approvers or list(route.steps.select_related("approver").order_by("order"))
+        if not any(item.approver_id != document.general_director_id for item in participants):
+            raise ValueError("Добавьте хотя бы одного согласующего перед финальным согласованием директора.")
+
     if route:
         document.route = route
     document.status = Document.ON_APPROVAL
@@ -282,9 +293,14 @@ def start_approval(document, user, request=None):
     document.approval_tasks.all().delete()
 
     if configured_approvers:
+        parallel_approvers = configured_approvers
+        if is_parallel and document.requires_general_director_approval:
+            parallel_approvers = [
+                item for item in configured_approvers if item.approver_id != document.general_director_id
+            ]
         active_approvers = (
-            configured_approvers
-            if _document_route_type(document) == ApprovalRoute.PARALLEL
+            parallel_approvers
+            if is_parallel
             else [configured_approvers[0]]
         )
         for item in active_approvers:
@@ -303,7 +319,9 @@ def start_approval(document, user, request=None):
     if not steps:
         raise ValueError("В маршруте согласования нет этапов.")
 
-    active_steps = steps if _document_route_type(document) == ApprovalRoute.PARALLEL else [steps[0]]
+    active_steps = steps if is_parallel else [steps[0]]
+    if is_parallel and document.requires_general_director_approval:
+        active_steps = [step for step in steps if step.approver_id != document.general_director_id]
     for step in active_steps:
         task = ApprovalTask.objects.create(
             document=document,
@@ -396,6 +414,38 @@ def _complete_parallel_cycle(document):
     ).exists():
         document.status = Document.RETURNED
         document.save(update_fields=["status", "updated_at"])
+        return
+    if document.requires_general_director_approval and document.general_director_id:
+        director_tasks = document.approval_tasks.filter(is_final_director_approval=True)
+        if director_tasks.filter(status=ApprovalTask.APPROVED).exists():
+            _finish_document_approval(document)
+            return
+        if director_tasks.exists():
+            document.status = Document.RETURNED
+            document.save(update_fields=["status", "updated_at"])
+            return
+
+        approver = document.configured_approvers.filter(
+            approver_id=document.general_director_id
+        ).order_by("order").first()
+        step = None
+        if approver is None and document.route_id:
+            step = document.route.steps.filter(
+                approver_id=document.general_director_id
+            ).order_by("order").first()
+        due_days = approver.due_days if approver else (step.due_days if step else 3)
+        ApprovalTask.objects.create(
+            document=document,
+            configured_approver=approver,
+            step=step,
+            approver_id=document.general_director_id,
+            document_version=document.version,
+            due_date=timezone.localdate() + timedelta(days=due_days),
+            is_final_director_approval=True,
+        )
+        document.status = Document.ON_APPROVAL
+        document.save(update_fields=["status", "updated_at"])
+        notify_approval_required(document.general_director, document)
         return
     _finish_document_approval(document)
 
@@ -665,6 +715,7 @@ def resubmit_parallel_approval(document, user, revision_request, correction, upl
         approver=previous_task.approver,
         document_version=document.version,
         due_date=timezone.localdate() + timedelta(days=due_days),
+        is_final_director_approval=previous_task.is_final_director_approval,
     )
 
     correction_summary = (
@@ -719,6 +770,7 @@ def delegate_task(task, user, delegated_to, comment="", request=None):
         approver=delegated_to,
         document_version=task.document_version,
         due_date=task.due_date,
+        is_final_director_approval=task.is_final_director_approval,
     )
     log_action(
         user,

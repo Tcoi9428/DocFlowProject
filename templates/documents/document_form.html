@@ -77,6 +77,16 @@
                     {{ form.approval_route_type.errors }}
                 </div>
             </div>
+            <div id="director-settings" class="director-settings" hidden>
+                <label class="director-toggle" for="{{ form.requires_general_director_approval.id_for_label }}">
+                    {{ form.requires_general_director_approval }} {{ form.requires_general_director_approval.label }}
+                </label>
+                {{ form.requires_general_director_approval.errors }}
+                <div id="director-user-field" class="inline-field" hidden>
+                    {{ form.general_director.label_tag }}
+                    <div>{{ form.general_director }}{{ form.general_director.errors }}</div>
+                </div>
+            </div>
 
             <div class="approval-builder-toolbar">
                 <button type="button" id="add-approver-button">+ Добавить согласующего</button>
@@ -145,10 +155,22 @@
     const routeTemplates = {{ route_templates_json|safe }};
     const routeField = document.querySelector("#id_route");
     const routeTypeFields = document.querySelectorAll("[name='approval_route_type']");
+    const directorSettings = document.querySelector("#director-settings");
+    const directorToggle = document.querySelector("#id_requires_general_director_approval");
+    const directorUserField = document.querySelector("#director-user-field");
     const approverList = document.querySelector("#approver-list");
     const approverTemplate = document.querySelector("#approver-row-template");
     const addApproverButton = document.querySelector("#add-approver-button");
     const clearApproversButton = document.querySelector("#clear-approvers-button");
+
+    function updateDirectorSettings() {
+        const parallel = Array.from(routeTypeFields).some((field) => field.checked && field.value === "parallel");
+        if (directorSettings) directorSettings.hidden = !parallel;
+        if (directorUserField) directorUserField.hidden = !parallel || !directorToggle.checked;
+    }
+
+    routeTypeFields.forEach((field) => field.addEventListener("change", updateDirectorSettings));
+    if (directorToggle) directorToggle.addEventListener("change", updateDirectorSettings);
 
     function addApproverRow(data = {}) {
         if (!approverList || !approverTemplate) return;
@@ -188,6 +210,7 @@
                 routeTypeFields.forEach((field) => {
                     field.checked = field.value === selectedTemplate.route_type;
                 });
+                updateDirectorSettings();
             }
             if (!rows.length || !approverList) return;
             approverList.innerHTML = "";
@@ -196,5 +219,6 @@
     }
 
     bindApproverListActions();
+    updateDirectorSettings();
 </script>
 {% endblock %}

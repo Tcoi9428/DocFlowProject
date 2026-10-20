@@ -39,7 +39,7 @@
                                 <strong>{{ task.document.system_number }}</strong><br>
                                 {{ task.document.title }}
                             </td>
-                            <td data-label="Текущий этап">{% if task.step %}{{ task.step.name }}{% else %}Этап согласования{% endif %}</td>
+                            <td data-label="Текущий этап">{% if task.is_final_director_approval %}Финальное согласование генерального директора{% elif task.step %}{{ task.step.name }}{% else %}Этап согласования{% endif %}</td>
                             <td data-label="Ответственный">{% include "documents/partials/user_display.html" with person=task.approver %}</td>
                             <td data-label="Срок" class="{% if task.is_overdue %}danger-text{% endif %}">{{ task.due_date|date:"d.m.Y"|default:"-" }}</td>
                             <td data-label="Статус">
@@ -70,7 +70,7 @@
                 <dl class="details approval-preview-details">
                     <dt>Инициатор</dt><dd>{% include "documents/partials/user_display.html" with person=task.document.author %}</dd>
                     <dt>Ответственный</dt><dd>{% include "documents/partials/user_display.html" with person=task.document.responsible %}</dd>
-                    <dt>Текущий этап</dt><dd>{% if task.step %}{{ task.step.name }}{% else %}Этап согласования{% endif %}</dd>
+                    <dt>Текущий этап</dt><dd>{% if task.is_final_director_approval %}Финальное согласование генерального директора{% elif task.step %}{{ task.step.name }}{% else %}Этап согласования{% endif %}</dd>
                     <dt>Срок</dt><dd class="{% if task.is_overdue %}danger-text{% endif %}">{{ task.due_date|date:"d.m.Y"|default:"-" }}</dd>
                 </dl>
 
@@ -78,7 +78,7 @@
                 <ul class="timeline">
                     {% for item in task.document.approval_tasks.all %}
                         <li class="{% if item.status == 'approved' %}done{% elif item.is_overdue %}danger{% elif item.pk == task.pk %}current{% elif item.status == 'pending' %}current{% endif %}">
-                            <strong>{% if item.step %}{{ item.step.name }}{% else %}Этап согласования{% endif %}</strong><br>
+                            <strong>{% if item.is_final_director_approval %}Финальное согласование генерального директора{% elif item.step %}{{ item.step.name }}{% else %}Этап согласования{% endif %}</strong><br>
                             {% include "documents/partials/user_display.html" with person=item.approver %}<br>
                             <small>{{ item.get_status_display }} · срок {{ item.due_date|date:"d.m.Y"|default:"-" }}</small>
                         </li>
