@@ -82,7 +82,7 @@
             {% endfor %}
         </ul>
         {% if can_manage_attachments %}
-            {% if document.approval_route_type == "parallel" and open_revision_requests %}
+            {% if can_work_on_revision %}
                 <p class="attachment-upload-note">Новую версию приложите в форме ответа на соответствующее замечание ниже.</p>
             {% else %}
                 <form method="post" enctype="multipart/form-data" action="{% url 'documents:upload_attachment' document.pk %}" class="form compact">
@@ -167,11 +167,11 @@
             <dt>Комментарий</dt><dd>{{ document.revision_comment|linebreaksbr|default:"-" }}</dd>
         </dl>
     </div>
-    <form method="post" action="{% url 'documents:resubmit_after_revision' document.pk %}" class="form revision-form">
+    <form method="post" enctype="multipart/form-data" action="{% url 'documents:resubmit_after_revision' document.pk %}" class="form revision-form revision-request-form">
         {% csrf_token %}
         {{ revision_form.as_p }}
         <div class="actions">
-            <button class="primary" type="submit">Корректировки внесены, отправить на согласование</button>
+            <button class="primary" type="submit">Устранить замечание и отправить новую версию</button>
         </div>
     </form>
 </section>

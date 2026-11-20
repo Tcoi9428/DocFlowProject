@@ -1098,15 +1098,46 @@ class DocumentWorkflowTests(TestCase):
         return_for_revision(task, self.manager, comment="Нужна новая версия")
 
         self.client.force_login(self.director)
+        detail = self.client.get(f"/documents/{document.pk}/")
+        self.assertContains(detail, 'enctype="multipart/form-data"')
+        self.assertContains(detail, 'name="file"')
         response = self.client.post(
             f"/documents/{document.pk}/resubmit/",
-            {"corrections": "Обновлен файл договора и условия оплаты."},
+            {"corrections": "Только текст без файла"},
+        )
+        document.refresh_from_db()
+        self.assertEqual(document.version, 1)
+        self.assertEqual(document.status, Document.RETURNED)
+        self.assertFalse(document.attachments.exists())
+        media = TemporaryDirectory()
+        self.addCleanup(media.cleanup)
+        media_override = override_settings(MEDIA_ROOT=media.name)
+        media_override.enable()
+        self.addCleanup(media_override.disable)
+        response = self.client.post(
+            f"/documents/{document.pk}/resubmit/",
+            {
+                "corrections": "Обновлен файл договора и условия оплаты.",
+                "file": SimpleUploadedFile("corrected.txt", b"Corrected contract"),
+            },
         )
         document.refresh_from_db()
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(document.version, 2)
         self.assertEqual(document.status, Document.ON_APPROVAL)
+        attachment = document.attachments.get()
+        self.assertEqual(attachment.document_version, 2)
+        with attachment.file.open("rb") as corrected_file:
+            self.assertEqual(corrected_file.read(), b"Corrected contract")
+        remark = document.revision_requests.get()
+        self.assertEqual(remark.status, RevisionRequest.RESOLVED)
+        self.assertEqual(remark.resolution_attachment, attachment)
+        self.assertEqual(remark.resolved_in_version, 2)
+        self.assertEqual(remark.requested_by, self.manager)
+        self.assertEqual(document.approval_tasks.filter(status=ApprovalTask.PENDING).count(), 1)
+        retry = document.approval_tasks.get(status=ApprovalTask.PENDING)
+        self.assertEqual(retry.document_version, 2)
         self.assertTrue(
             ApprovalTask.objects.filter(
                 document=document,
@@ -1121,6 +1152,10 @@ class DocumentWorkflowTests(TestCase):
                 text__icontains="Обновлен файл договора",
             ).exists()
         )
+        approve_task(retry, self.manager)
+        next_task = document.approval_tasks.get(status=ApprovalTask.PENDING)
+        self.assertEqual(next_task.approver, self.director)
+        self.assertEqual(next_task.document_version, 2)
 
     def test_password_reset_request_notifies_admin_with_code(self):
         admin = User.objects.create_user(username="admin2", password="admin2", is_staff=True)

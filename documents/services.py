@@ -266,7 +266,7 @@ def _document_route_type(document):
 
 
 @transaction.atomic
-def start_approval(document, user, request=None):
+def start_approval(document, user, request=None, preserve_history=False):
     route = document.route or ApprovalRoute.objects.filter(
         document_type=document.document_type,
         is_default=True,
@@ -290,7 +290,8 @@ def start_approval(document, user, request=None):
         document.route = route
     document.status = Document.ON_APPROVAL
     document.save(update_fields=["route", "status", "updated_at"])
-    document.approval_tasks.all().delete()
+    if not preserve_history:
+        document.approval_tasks.all().delete()
 
     if configured_approvers:
         parallel_approvers = configured_approvers
@@ -611,6 +612,59 @@ def return_for_revision(task, user, responsible=None, comment="", request=None):
             else f"Документ отправлен на доработку пользователем {user_identity(user)}."
         ),
     )
+
+
+@transaction.atomic
+def resubmit_sequential_approval(document, user, correction, uploaded_file, request=None):
+    document = Document.objects.select_for_update().get(pk=document.pk)
+    if _document_route_type(document) == ApprovalRoute.PARALLEL or document.status != Document.RETURNED:
+        raise ValueError("Документ не находится на последовательной доработке.")
+    if not user.is_superuser and document.responsible_id != user.pk:
+        raise ValueError("Ответить на замечание может только ответственный пользователь.")
+    correction = correction.strip()
+    if not correction or not uploaded_file:
+        raise ValueError("Опишите внесенные корректировки и приложите файл новой версии.")
+    if uploaded_file.size > settings.MAX_UPLOAD_SIZE:
+        raise ValueError("Размер файла превышает допустимый.")
+
+    previous_task = document.approval_tasks.filter(
+        status=ApprovalTask.RETURNED, approver_id=document.revision_requested_by_id,
+    ).order_by("-completed_at", "-pk").first()
+    if previous_task is None:
+        raise ValueError("Не найдена задача с замечанием. Обратитесь к администратору.")
+    remark, _ = RevisionRequest.objects.get_or_create(
+        approval_task=previous_task,
+        defaults={
+            "document": document,
+            "requested_by_id": document.revision_requested_by_id,
+            "document_version": previous_task.document_version,
+            "comment": document.revision_comment,
+        },
+    )
+    document.version += 1
+    document.revision_requested_by = None
+    document.revision_requested_at = None
+    document.revision_comment = ""
+    document.save(update_fields=[
+        "version", "revision_requested_by", "revision_requested_at", "revision_comment", "updated_at",
+    ])
+    # Keep the returned task: the revision history references it.
+    start_approval(document, user, request, preserve_history=True)
+    attachment = create_document_attachment(document, user, uploaded_file)
+    remark.status = RevisionRequest.RESOLVED
+    remark.resolution_comment = correction
+    remark.resolved_by = user
+    remark.resolved_at = timezone.now()
+    remark.resolved_in_version = document.version
+    remark.resolution_attachment = attachment
+    remark.save()
+    DocumentComment.objects.create(
+        document=document, author=user,
+        text=f"Ответ по замечанию: {correction}\nФайл версии {document.version}: {attachment.original_name}",
+    )
+    log_action(user, document, AuditLog.UPDATE,
+               f"Замечание устранено. Создана версия {document.version}: {attachment.original_name}.", request)
+    return attachment
 
 
 @transaction.atomic

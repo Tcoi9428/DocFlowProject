@@ -471,14 +471,6 @@ class CommentForm(forms.ModelForm):
 
 class RevisionCorrectionForm(forms.Form):
     corrections = forms.CharField(
-        label="Внесенные корректировки",
-        widget=forms.Textarea(attrs={"rows": 4, "placeholder": "Опишите, какие правки внесены перед повторным согласованием"}),
-    )
-
-
-class ParallelRevisionCorrectionForm(forms.Form):
-    revision_request_id = forms.IntegerField(widget=forms.HiddenInput())
-    corrections = forms.CharField(
         label="Ответ по замечанию",
         widget=forms.Textarea(
             attrs={
@@ -498,6 +490,10 @@ class ParallelRevisionCorrectionForm(forms.Form):
             max_size_mb = settings.MAX_UPLOAD_SIZE // 1024 // 1024
             raise ValidationError(f"Размер файла больше {max_size_mb} МБ.")
         return uploaded_file
+
+
+class ParallelRevisionCorrectionForm(RevisionCorrectionForm):
+    revision_request_id = forms.IntegerField(widget=forms.HiddenInput())
 
 
 class ApprovalTaskFilterForm(forms.Form):

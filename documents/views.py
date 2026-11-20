@@ -60,6 +60,7 @@ from .services import (
     reject_task,
     return_for_revision,
     resubmit_parallel_approval,
+    resubmit_sequential_approval,
     start_approval,
     create_notification,
 )
@@ -979,30 +980,18 @@ def resubmit_after_revision(request, pk):
                 )
             return redirect("documents:detail", pk=document.pk)
 
-        form = RevisionCorrectionForm(request.POST)
+        form = RevisionCorrectionForm(request.POST, request.FILES)
         if form.is_valid():
-            corrections = form.cleaned_data["corrections"]
-            document.version += 1
-            document.save(update_fields=["version", "updated_at"])
-            DocumentComment.objects.create(
-                document=document,
-                author=request.user,
-                text=f"Ответственным пользователем внесены правки. Версия документа: {document.version}.\n\nКорректировки: {corrections}",
-            )
-            log_action(
-                request.user,
-                document,
-                AuditLog.UPDATE,
-                f"Внесены корректировки по возврату на доработку. Документ переведен в версию {document.version}.",
-                request,
-            )
             try:
-                start_approval(document, request.user, request)
+                resubmit_sequential_approval(
+                    document, request.user, form.cleaned_data["corrections"],
+                    form.cleaned_data["file"], request,
+                )
                 messages.success(request, "Корректировки сохранены, документ повторно отправлен на согласование.")
             except ValueError as exc:
                 messages.error(request, str(exc))
             return redirect("documents:detail", pk=document.pk)
-        messages.error(request, "Укажите внесенные корректировки.")
+        messages.error(request, "Опишите внесенные корректировки и приложите файл новой версии.")
     return redirect("documents:detail", pk=document.pk)
 
 
